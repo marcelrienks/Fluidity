@@ -122,6 +122,19 @@ gen-certs:
 	@echo "Generating development certificates..."
 	@./scripts/generate-certs.sh
 
+# Local build and run targets
+build-local: clean deps build
+
+run-agent-local:
+	@echo "Running agent locally (local config)..."
+	@$(GOBUILD) -o $(BUILD_DIR)/$(AGENT_BINARY) ./$(AGENT_DIR)
+	@./$(BUILD_DIR)/$(AGENT_BINARY) --config ./configs/agent.local.yaml
+
+run-server-local:
+	@echo "Running server locally (local config)..."
+	@$(GOBUILD) -o $(BUILD_DIR)/$(SERVER_BINARY) ./$(SERVER_DIR)
+	@./$(BUILD_DIR)/$(SERVER_BINARY) --config ./configs/server.local.yaml
+
 # Help
 help:
 	@echo "Available targets:"
@@ -141,3 +154,6 @@ help:
 	@echo "  lint          - Lint Go code"
 	@echo "  gen-certs     - Generate development certificates"
 	@echo "  help          - Show this help message"
+	@echo "  build-local   - Clean, download deps, and build for local debugging"
+	@echo "  run-agent-local - Build and run agent with local config"
+	@echo "  run-server-local - Build and run server with local config"
