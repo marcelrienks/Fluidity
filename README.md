@@ -1,6 +1,6 @@
 # Fluidity
 
-*Allowing http traffic to flow freely*
+**Allowing http traffic to flow freely**
 
 Provides tools and strategies for enabling flexible HTTP traffic, tunneling, and routing.
 
