@@ -110,7 +110,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create context for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
+	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Set up signal handling

@@ -46,7 +46,6 @@ func NewServer(tlsConfig *tls.Config, addr string, maxConns int) (*Server, error
 			MaxIdleConnsPerHost: 10,
 			IdleConnTimeout:     90 * time.Second,
 			TLSHandshakeTimeout: 10 * time.Second,
-			DialTimeout:         10 * time.Second,
 		},
 	}
 	

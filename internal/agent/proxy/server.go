@@ -1,15 +1,12 @@
 package proxy
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"net/url"
-	"strings"
 	"time"
 
 	"fluidity/internal/agent/tunnel"
