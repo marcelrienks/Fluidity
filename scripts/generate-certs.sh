@@ -31,6 +31,7 @@ openssl req -new -key "$CERTS_DIR/server.key" -out "$CERTS_DIR/server.csr" -subj
 
 # Create server certificate extensions file
 cat > "$CERTS_DIR/server.ext" << EOF
+[v3_req]
 authorityKeyIdentifier=keyid,issuer
 basicConstraints=CA:FALSE
 keyUsage = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment

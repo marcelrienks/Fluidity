@@ -120,13 +120,28 @@ Before building or running Fluidity, ensure you have the following installed:
 
 Fluidity provides OS-specific Makefiles for building and running the project. For most users, the commands are the same across Windows, macOS, and Linux:
 
-**Windows/macOS/Linux:**
+Always use the Makefile that matches your operating system:
+
+**Windows:**
 ```sh
-make -f Makefile.<os> build
-make -f Makefile.<os> run-server-local
-make -f Makefile.<os> run-agent-local
+make -f Makefile.win build
+make -f Makefile.win run-server-local
+make -f Makefile.win run-agent-local
 ```
-Replace `<os>` with `win`, `macos`, or `linux` as appropriate for your platform (e.g., `Makefile.win` for Windows).
+
+**macOS:**
+```sh
+make -f Makefile.macos build
+make -f Makefile.macos run-server-local
+make -f Makefile.macos run-agent-local
+```
+
+**Linux:**
+```sh
+make -f Makefile.linux build
+make -f Makefile.linux run-server-local
+make -f Makefile.linux run-agent-local
+```
 
 > **Note:** The default `Makefile` is for reference and may not work natively on all platforms. Always use the OS-specific Makefile for your environment.
 
@@ -151,11 +166,64 @@ chmod +x scripts/generate-certs.sh
 
 
 ### 2. Build and Run Locally (Windows/macOS/Linux)
+#### Build Docker Images
+##### Understanding the Build Commands
+
+There are three key build commands for local and containerized development:
+
+- `make -f Makefile.macos build`: Compiles the Go source code for both the agent and server, producing native binaries in the `build/` directory. Use this if you want to run the agent and server directly on your macOS system (outside Docker).
+- `make -f Makefile.macos docker-build-server`: Builds a Docker image for the server using the Dockerfile in `deployments/server/`. The image is tagged as `fluidity-server`. Use this to run the server inside a Docker container.
+- `make -f Makefile.macos docker-build-agent`: Builds a Docker image for the agent using the Dockerfile in `deployments/agent/`. The image is tagged as `fluidity-agent`. Use this to run the agent inside a Docker container.
+
+**Summary:**
+- Use `build` for local/native execution.
+- Use `docker-build-server` and `docker-build-agent` to prepare Docker images for containerized execution.
+Use the OS-specific Makefile for your platform to build the Go binaries and Docker images:
+
+**Windows:**
 ```sh
-make build-local
-make run-server-local
-make run-agent-local
+make -f Makefile.win build
+make -f Makefile.win docker-build-server
+make -f Makefile.win docker-build-agent
 ```
+**macOS:**
+```sh
+make -f Makefile.macos build
+make -f Makefile.macos docker-build-server
+make -f Makefile.macos docker-build-agent
+```
+**Linux:**
+```sh
+make -f Makefile.linux build
+make -f Makefile.linux docker-build-server
+make -f Makefile.linux docker-build-agent
+```
+
+Then, run the server and agent containers, passing the config file via the `--config` flag and mounting the certs directory:
+
+**Run Server:**
+```sh
+docker run --rm \
+  -v $(pwd)/certs:/root/certs \
+  -v $(pwd)/configs/server.local.yaml:/root/config/server.yaml \
+  -p 8443:8443 \
+  fluidity-server \
+  ./fluidity-server --config ./config/server.yaml
+```
+
+**Run Agent:**
+```sh
+docker run --rm \
+  -v $(pwd)/certs:/root/certs \
+  -v $(pwd)/configs/agent.local.yaml:/root/config/agent.yaml \
+  -p 8080:8080 \
+  fluidity-agent \
+  ./fluidity-agent --config ./config/agent.yaml
+```
+
+- The agent will connect to the server at `127.0.0.1:8443` (as set in `agent.local.yaml`).
+- Both containers use local certificates and config files.
+- The `--config` flag ensures each binary loads the correct settings.
 
 ### 5. Configure Your Browser
 Set your browser's HTTP proxy to `localhost:8080`.
