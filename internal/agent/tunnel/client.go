@@ -20,6 +20,7 @@ type Client struct {
 	conn        *tls.Conn
 	mu          sync.RWMutex
 	requests    map[string]chan *protocol.Response
+	connectCh   map[string]chan *protocol.ConnectData
 	logger      *logging.Logger
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -35,6 +36,7 @@ func NewClient(tlsConfig *tls.Config, serverAddr string) *Client {
 		config:      tlsConfig,
 		serverAddr:  serverAddr,
 		requests:    make(map[string]chan *protocol.Response),
+		connectCh:   make(map[string]chan *protocol.ConnectData),
 		logger:      logging.NewLogger("tunnel-client"),
 		ctx:         ctx,
 		cancel:      cancel,
@@ -131,9 +133,10 @@ func (c *Client) SendRequest(req *protocol.Request) (*protocol.Response, error) 
 	c.requests[req.ID] = respChan
 	c.mu.Unlock()
 
-	// Send request
+	// Send request wrapped in Envelope
 	encoder := json.NewEncoder(conn)
-	if err := encoder.Encode(req); err != nil {
+	env := protocol.Envelope{Type: "http_request", Payload: req}
+	if err := encoder.Encode(env); err != nil {
 		c.mu.Lock()
 		delete(c.requests, req.ID)
 		c.mu.Unlock()
@@ -187,30 +190,78 @@ func (c *Client) handleResponses() {
 		default:
 		}
 
-		var resp protocol.Response
-		if err := decoder.Decode(&resp); err != nil {
-			c.logger.Error("Failed to decode response", err)
+		var env protocol.Envelope
+		if err := decoder.Decode(&env); err != nil {
+			c.logger.Error("Failed to decode envelope", err)
 			return
 		}
 
-		c.logger.Debug("Received response from tunnel", "id", resp.ID, "status", resp.StatusCode)
-
-		c.mu.RLock()
-		respChan, exists := c.requests[resp.ID]
-		c.mu.RUnlock()
-
-		if exists {
-			select {
-			case respChan <- &resp:
-			case <-time.After(1 * time.Second):
-				c.logger.Warn("Response channel blocked", "id", resp.ID)
+		switch env.Type {
+		case "http_response":
+			// Parse payload as Response
+			m, _ := env.Payload.(map[string]any)
+			b, _ := json.Marshal(m)
+			var resp protocol.Response
+			if err := json.Unmarshal(b, &resp); err != nil {
+				c.logger.Error("Failed to parse http_response", err)
+				continue
+			}
+			c.logger.Debug("Received response from tunnel", "id", resp.ID, "status", resp.StatusCode)
+			c.mu.RLock()
+			respChan, exists := c.requests[resp.ID]
+			c.mu.RUnlock()
+			if exists {
+				select {
+				case respChan <- &resp:
+				case <-time.After(1 * time.Second):
+					c.logger.Warn("Response channel blocked", "id", resp.ID)
+				}
+				c.mu.Lock()
+				delete(c.requests, resp.ID)
+				c.mu.Unlock()
+			} else {
+				c.logger.Warn("Received response for unknown request", "id", resp.ID)
 			}
 
+		case "connect_ack":
+			// Ignore ack for now (we return synthetic ack immediately on ConnectOpen)
+			continue
+
+		case "connect_data":
+			m, _ := env.Payload.(map[string]any)
+			b, _ := json.Marshal(m)
+			var data protocol.ConnectData
+			if err := json.Unmarshal(b, &data); err != nil {
+				c.logger.Error("Failed to parse connect_data", err)
+				continue
+			}
+			c.mu.RLock()
+			ch := c.connectCh[data.ID]
+			c.mu.RUnlock()
+			if ch != nil {
+				select {
+				case ch <- &data:
+				default:
+					// Channel full, drop packet (backpressure)
+				}
+			}
+
+		case "connect_close":
+			m, _ := env.Payload.(map[string]any)
+			b, _ := json.Marshal(m)
+			var cls protocol.ConnectClose
+			if err := json.Unmarshal(b, &cls); err != nil {
+				continue
+			}
 			c.mu.Lock()
-			delete(c.requests, resp.ID)
+			if ch := c.connectCh[cls.ID]; ch != nil {
+				close(ch)
+				delete(c.connectCh, cls.ID)
+			}
 			c.mu.Unlock()
-		} else {
-			c.logger.Warn("Received response for unknown request", "id", resp.ID)
+
+		default:
+			// Ignore unknown message types
 		}
 	}
 }
@@ -234,4 +285,65 @@ func (c *Client) extractHost(addr string) string {
 		return addr
 	}
 	return host
+}
+
+// ConnectOpen requests a TCP tunnel to host:port
+func (c *Client) ConnectOpen(id, address string) (*protocol.ConnectAck, error) {
+	c.mu.RLock()
+	if !c.connected || c.conn == nil {
+		c.mu.RUnlock()
+		return nil, fmt.Errorf("not connected to server")
+	}
+	conn := c.conn
+	c.mu.RUnlock()
+
+	// Prepare data channel for this connection
+	c.mu.Lock()
+	if _, exists := c.connectCh[id]; !exists {
+		c.connectCh[id] = make(chan *protocol.ConnectData, 64)
+	}
+	c.mu.Unlock()
+
+	env := protocol.Envelope{Type: "connect_open", Payload: &protocol.ConnectOpen{ID: id, Address: address}}
+	if err := json.NewEncoder(conn).Encode(env); err != nil {
+		return nil, fmt.Errorf("failed to send connect_open: %w", err)
+	}
+
+	// Return synthetic ack; server will send connect_data or connect_close on failure
+	ack := &protocol.ConnectAck{ID: id, Ok: true}
+	return ack, nil
+}
+
+// ConnectSend sends a data chunk over the tunnel
+func (c *Client) ConnectSend(id string, chunk []byte) error {
+	c.mu.RLock()
+	if !c.connected || c.conn == nil {
+		c.mu.RUnlock()
+		return fmt.Errorf("not connected to server")
+	}
+	conn := c.conn
+	c.mu.RUnlock()
+	env := protocol.Envelope{Type: "connect_data", Payload: &protocol.ConnectData{ID: id, Chunk: chunk}}
+	return json.NewEncoder(conn).Encode(env)
+}
+
+// ConnectClose closes a tunnel stream
+func (c *Client) ConnectClose(id, errMsg string) error {
+	c.mu.RLock()
+	if !c.connected || c.conn == nil {
+		c.mu.RUnlock()
+		return nil
+	}
+	conn := c.conn
+	c.mu.RUnlock()
+	env := protocol.Envelope{Type: "connect_close", Payload: &protocol.ConnectClose{ID: id, Error: errMsg}}
+	return json.NewEncoder(conn).Encode(env)
+}
+
+// ConnectDataChannel returns the data channel for a given tunnel id
+func (c *Client) ConnectDataChannel(id string) <-chan *protocol.ConnectData {
+	c.mu.RLock()
+	ch := c.connectCh[id]
+	c.mu.RUnlock()
+	return ch
 }

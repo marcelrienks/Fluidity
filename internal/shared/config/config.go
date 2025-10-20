@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 )
 
 // LoadConfig loads configuration with CLI override support
@@ -62,10 +63,17 @@ func SaveConfig(configFile string, config interface{}) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
-	
-	v := viper.New()
-	v.Set("config", config)
-	return v.WriteConfigAs(configFile)
+
+	// Marshal the provided config directly as YAML
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	if err := os.WriteFile(configFile, data, 0644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+	return nil
 }
 
 // setDefaults sets default configuration values

@@ -182,9 +182,30 @@ make test
 make fmt
 ```
 
-## What's Next (Phase 2)
+## What's Next (Phase 1.5 - Before Phase 2)
 
-1. **HTTPS Support**: Implement CONNECT method for HTTPS tunneling
+### Security Testing & Validation
+1. **EDR/Security Tool Testing**: Test functionality against endpoint detection tools
+   - Analyze behavior with CrowdStrike, Carbon Black, Windows Defender, etc.
+   - Identify potential security tool triggers or alerts
+   - Document any detection patterns or behavioral analysis concerns
+   
+2. **Security Tool Mitigation**: Implement changes to avoid triggering security monitoring
+   - Adjust network communication patterns if needed
+   - Review and optimize process behavior and resource usage
+   - Ensure legitimate use patterns don't trigger false positives
+   
+3. **Integration Testing**: Develop comprehensive integration test suite
+   - End-to-end HTTP request/response testing
+   - End-to-end HTTPS CONNECT tunneling testing
+   - Connection recovery and error handling scenarios
+   - Certificate validation and mTLS authentication flows
+   - Multi-request concurrent handling tests
+   - Performance and stress testing
+
+### Phase 2 Goals (After Phase 1.5)
+
+1. **Cloud Deployment**: Deploy to chosen cloud provider
 2. **WebSocket Support**: Add WebSocket protocol support
 3. **Enhanced Security**: Improve certificate management and validation
 4. **Better Error Handling**: Add circuit breakers and improved retry logic
@@ -215,3 +236,19 @@ make fmt
 - Try HTTP-only websites first (no HTTPS)
 
 For more details, see the main project documentation and architecture documents.
+
+---
+
+## Progress Update — 2025-10-20
+
+- Built and ran Docker scratch images for both server and agent
+- Generated development mTLS certificates via `scripts/generate-certs.ps1`
+- Started containers on a user-defined Docker network (`fluidity-net`)
+- Agent successfully established a TLS connection (TLS 1.3) to the server using client certs
+- Verified end-to-end HTTP proxying with:
+
+  ```powershell
+  curl.exe -x http://127.0.0.1:8080 http://example.com -I
+  ```
+
+- Current limitation remains: HTTPS tunneling (CONNECT) not implemented yet — test with HTTP sites

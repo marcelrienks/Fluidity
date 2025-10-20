@@ -76,6 +76,16 @@ A dual-component system consisting of:
 - [ ] **FR-019**: Implement recommended security measures for public server deployment
 - [ ] **FR-020**: Minimal logging for debugging purposes only (startup, connections, endpoint routing)
 - [ ] **FR-021**: Support all protocols required for general web browsing
+- [ ] **FR-023**: Test and analyze detection by endpoint security tools (CrowdStrike, Carbon Black, etc.)
+- [ ] **FR-024**: Implement mitigations to avoid triggering EDR/security monitoring alerts
+
+### 4.4 Testing Requirements
+- [ ] **FR-025**: Develop integration tests for HTTP tunneling functionality
+- [ ] **FR-026**: Develop integration tests for HTTPS CONNECT tunneling
+- [ ] **FR-027**: Implement end-to-end test scenarios with real servers
+- [ ] **FR-028**: Create automated test suite for CI/CD pipeline
+- [ ] **FR-029**: Test connection recovery and error handling scenarios
+- [ ] **FR-030**: Validate certificate validation and mTLS authentication flows
 
 ---
 
@@ -141,6 +151,11 @@ A dual-component system consisting of:
 - Implement basic tunnel agent in Go
 - Establish secure communication protocol
 - Create Docker containers for both components
+- **Phase 1.5: Security & Testing (Before Phase 2)**
+  - Test and evaluate detection by security tools (CrowdStrike, Carbon Black, etc.)
+  - Implement mitigations to prevent triggering EDR/security monitoring tools
+  - Develop comprehensive integration tests for end-to-end functionality
+  - Validate HTTP and HTTPS tunneling with real-world scenarios
 
 ### 7.2 Phase 2: Cloud Deployment (Weeks 5-6)
 - Deploy server to chosen cloud provider

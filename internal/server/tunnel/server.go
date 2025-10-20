@@ -29,6 +29,8 @@ type Server struct {
 	maxConns    int
 	activeConns int32
 	connMutex   sync.RWMutex
+	tcpConns    map[string]net.Conn
+	tcpMutex    sync.RWMutex
 }
 
 // NewServer creates a new tunnel server
@@ -58,6 +60,7 @@ func NewServer(tlsConfig *tls.Config, addr string, maxConns int) (*Server, error
 		ctx:        ctx,
 		cancel:     cancel,
 		maxConns:   maxConns,
+		tcpConns:   make(map[string]net.Conn),
 	}, nil
 }
 
@@ -166,16 +169,58 @@ func (s *Server) handleConnection(conn *tls.Conn) {
 		default:
 		}
 
-		var req protocol.Request
-		if err := decoder.Decode(&req); err != nil {
+		var env protocol.Envelope
+		if err := decoder.Decode(&env); err != nil {
 			if err != io.EOF {
-				s.logger.Error("Failed to decode request", err)
+				s.logger.Error("Failed to decode envelope", err)
 			}
 			break
 		}
 
-		// Process request in a goroutine to handle concurrent requests
-		go s.processRequest(&req, encoder)
+		switch env.Type {
+		case "http_request":
+			m, _ := env.Payload.(map[string]any)
+			b, _ := json.Marshal(m)
+			var req protocol.Request
+			if err := json.Unmarshal(b, &req); err != nil {
+				s.logger.Error("Failed to parse http_request", err)
+				continue
+			}
+			// Process request in a goroutine to handle concurrent requests
+			go s.processRequest(&req, encoder)
+
+		case "connect_open":
+			m, _ := env.Payload.(map[string]any)
+			b, _ := json.Marshal(m)
+			var open protocol.ConnectOpen
+			if err := json.Unmarshal(b, &open); err != nil {
+				s.logger.Error("Failed to parse connect_open", err)
+				continue
+			}
+			go s.handleConnectOpen(&open, encoder)
+
+		case "connect_data":
+			m, _ := env.Payload.(map[string]any)
+			b, _ := json.Marshal(m)
+			var data protocol.ConnectData
+			if err := json.Unmarshal(b, &data); err != nil {
+				s.logger.Error("Failed to parse connect_data", err)
+				continue
+			}
+			go s.handleConnectData(&data)
+
+		case "connect_close":
+			m, _ := env.Payload.(map[string]any)
+			b, _ := json.Marshal(m)
+			var cls protocol.ConnectClose
+			if err := json.Unmarshal(b, &cls); err != nil {
+				continue
+			}
+			go s.handleConnectClose(&cls)
+
+		default:
+			// Ignore unknown message types
+		}
 	}
 
 	s.logger.Info("Client disconnected", "client", clientCert.Subject.CommonName)
@@ -217,7 +262,7 @@ func (s *Server) processRequest(req *protocol.Request, encoder *json.Encoder) {
 		return
 	}
 
-	// Send response back through tunnel
+	// Send response back through tunnel wrapped in Envelope
 	resp := &protocol.Response{
 		ID:         req.ID,
 		StatusCode: httpResp.StatusCode,
@@ -225,7 +270,8 @@ func (s *Server) processRequest(req *protocol.Request, encoder *json.Encoder) {
 		Body:       body,
 	}
 
-	if err := encoder.Encode(resp); err != nil {
+	env := protocol.Envelope{Type: "http_response", Payload: resp}
+	if err := encoder.Encode(env); err != nil {
 		s.logger.Error("Failed to send response", err, "id", req.ID)
 	}
 
@@ -244,7 +290,8 @@ func (s *Server) sendErrorResponse(reqID string, err error, encoder *json.Encode
 		Error:      err.Error(),
 	}
 
-	if encodeErr := encoder.Encode(resp); encodeErr != nil {
+	env := protocol.Envelope{Type: "http_response", Payload: resp}
+	if encodeErr := encoder.Encode(env); encodeErr != nil {
 		s.logger.Error("Failed to send error response", encodeErr, "id", reqID)
 	}
 }
@@ -277,4 +324,84 @@ func (s *Server) logRequest(req *protocol.Request) {
 // parseURL is a helper function to parse URLs safely
 func parseURL(rawURL string) (*url.URL, error) {
 	return url.Parse(rawURL)
+}
+
+// handleConnectOpen opens a TCP connection to the target address
+func (s *Server) handleConnectOpen(open *protocol.ConnectOpen, encoder *json.Encoder) {
+	s.logger.Info("CONNECT open request", "id", open.ID, "address", open.Address)
+
+	// Dial target
+	targetConn, err := net.DialTimeout("tcp", open.Address, 10*time.Second)
+	if err != nil {
+		s.logger.Error("CONNECT dial failed", err, "id", open.ID, "address", open.Address)
+		// Send error via connect_close
+		env := protocol.Envelope{Type: "connect_close", Payload: &protocol.ConnectClose{ID: open.ID, Error: err.Error()}}
+		_ = encoder.Encode(env)
+		return
+	}
+
+	// Store connection
+	s.tcpMutex.Lock()
+	s.tcpConns[open.ID] = targetConn
+	s.tcpMutex.Unlock()
+
+	// Send ack
+	env := protocol.Envelope{Type: "connect_ack", Payload: &protocol.ConnectAck{ID: open.ID, Ok: true}}
+	_ = encoder.Encode(env)
+
+	// Start reader goroutine: read from target and send to agent
+	go func() {
+		defer func() {
+			s.tcpMutex.Lock()
+			delete(s.tcpConns, open.ID)
+			s.tcpMutex.Unlock()
+			targetConn.Close()
+			// Send close
+			closeEnv := protocol.Envelope{Type: "connect_close", Payload: &protocol.ConnectClose{ID: open.ID}}
+			_ = encoder.Encode(closeEnv)
+		}()
+
+		buf := make([]byte, 32*1024)
+		for {
+			n, err := targetConn.Read(buf)
+			if n > 0 {
+				dataEnv := protocol.Envelope{Type: "connect_data", Payload: &protocol.ConnectData{ID: open.ID, Chunk: buf[:n]}}
+				if encErr := encoder.Encode(dataEnv); encErr != nil {
+					s.logger.Error("Failed to send connect_data", encErr, "id", open.ID)
+					return
+				}
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+}
+
+// handleConnectData writes data to the TCP connection
+func (s *Server) handleConnectData(data *protocol.ConnectData) {
+	s.tcpMutex.RLock()
+	targetConn := s.tcpConns[data.ID]
+	s.tcpMutex.RUnlock()
+
+	if targetConn == nil {
+		return
+	}
+
+	if _, err := targetConn.Write(data.Chunk); err != nil {
+		s.logger.Error("Failed to write to target conn", err, "id", data.ID)
+		s.handleConnectClose(&protocol.ConnectClose{ID: data.ID})
+	}
+}
+
+// handleConnectClose closes the TCP connection
+func (s *Server) handleConnectClose(cls *protocol.ConnectClose) {
+	s.tcpMutex.Lock()
+	targetConn := s.tcpConns[cls.ID]
+	delete(s.tcpConns, cls.ID)
+	s.tcpMutex.Unlock()
+
+	if targetConn != nil {
+		targetConn.Close()
+	}
 }

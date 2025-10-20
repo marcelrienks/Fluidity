@@ -34,12 +34,9 @@ func NewServer(port int, tunnelConn *tunnel.Client) *Server {
 		cancel:     cancel,
 	}
 	
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", proxy.handleRequest)
-	
 	proxy.server = &http.Server{
 		Addr:         fmt.Sprintf(":%d", port),
-		Handler:      mux,
+		Handler:      proxy, // Use proxy as handler directly to handle CONNECT
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -65,6 +62,11 @@ func (p *Server) Start() error {
 	
 	p.logger.Info("HTTP proxy server started", "addr", p.server.Addr)
 	return nil
+}
+
+// ServeHTTP implements http.Handler interface
+func (p *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	p.handleRequest(w, r)
 }
 
 // Stop gracefully shuts down the proxy server
@@ -140,10 +142,67 @@ func (p *Server) handleHTTPRequest(w http.ResponseWriter, r *http.Request) {
 
 // handleConnect handles HTTPS CONNECT requests for tunneling
 func (p *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
-	// For now, return 501 Not Implemented for CONNECT
-	// This will be enhanced in later phases to support HTTPS tunneling
-	p.logger.Warn("CONNECT method not yet implemented", "host", r.Host)
-	http.Error(w, "CONNECT method not implemented", http.StatusNotImplemented)
+	// Establish a TCP tunnel via the server using our protocol
+	reqID := p.generateRequestID()
+
+	// Ask tunnel to open remote connection
+	ack, err := p.tunnelConn.ConnectOpen(reqID, r.Host)
+	if err != nil || !ack.Ok {
+		if err == nil {
+			err = fmt.Errorf(ack.Error)
+		}
+		p.logger.Error("CONNECT open failed", err, "host", r.Host, "id", reqID)
+		http.Error(w, "Tunnel CONNECT failed", http.StatusBadGateway)
+		return
+	}
+
+	// Hijack client connection to get raw TCP
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "Proxy does not support hijacking", http.StatusInternalServerError)
+		return
+	}
+	clientConn, clientBuf, err := hj.Hijack()
+	if err != nil {
+		p.logger.Error("Hijack failed", err, "id", reqID)
+		return
+	}
+
+	// Send 200 Connection established
+	_, _ = clientBuf.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n")
+	_ = clientBuf.Flush()
+
+	// Start pump: client->server
+	go func() {
+		defer func() {
+			_ = p.tunnelConn.ConnectClose(reqID, "")
+			clientConn.Close()
+		}()
+		buf := make([]byte, 32*1024)
+		for {
+			n, err := clientConn.Read(buf)
+			if n > 0 {
+				if sendErr := p.tunnelConn.ConnectSend(reqID, buf[:n]); sendErr != nil {
+					p.logger.Error("CONNECT send error", sendErr, "id", reqID)
+					return
+				}
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	// Pump: server->client (main goroutine)
+	ch := p.tunnelConn.ConnectDataChannel(reqID)
+	for msg := range ch {
+		if msg.Chunk != nil && len(msg.Chunk) > 0 {
+			if _, err := clientConn.Write(msg.Chunk); err != nil {
+				p.logger.Error("CONNECT write to client failed", err, "id", reqID)
+				return
+			}
+		}
+	}
 }
 
 // writeResponse writes the tunnel response back to the HTTP client

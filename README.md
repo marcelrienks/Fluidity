@@ -5,12 +5,12 @@
 Provides a way for enabling HTTP traffic, tunnelling, and routing.
 Or in layman's terms 'bypass corporate firewall blocking useful sites'
 
-![Status](https://img.shields.io/badge/status-planning-blue)
+![Status](https://img.shields.io/badge/status-phase_1_(alpha)-blue)
 ![License](https://img.shields.io/badge/license-custom-lightgrey)
 
 ## Project Overview
 
-Fluidity is currently in the **planning phase** and aims to create a robust HTTP tunnel solution consisting of two main components:
+Fluidity is in **Phase 1 (core infrastructure, alpha)** and provides a robust HTTP tunnel solution consisting of two main components:
 
 - **Tunnel Server**: A Go-based server application deployed to a cloud service provider
 - **Tunnel Agent**: A Go-based client agent running locally
@@ -49,7 +49,12 @@ This architecture enables HTTP traffic to bypass restrictive corporate firewalls
 
 ## Current Status
 
-This project is currently in the **planning and design phase**. Implementation has not yet begun.
+Core infrastructure is up and running for local development and Docker containers:
+
+- Agent runs a local HTTP proxy on port 8080
+- Agent connects to server over mTLS using dev certificates (generated with the provided scripts)
+- Server accepts client-authenticated TLS and forwards HTTP requests to target sites
+- End-to-end HTTP browsing via the agent proxy is verified (HTTP only; HTTPS/CONNECT not implemented yet)
 
 ### Roadmap
 
@@ -197,6 +202,15 @@ make -f Makefile.linux docker-build-agent
 
 > **Note:** The default `Makefile` is for reference only. Always use the OS-specific Makefile for your environment.
 
+## Current Progress (Oct 20, 2025)
+
+Validated end-to-end HTTP tunneling via Docker containers (scratch images) with dev mTLS certs:
+
+- Built and ran server and agent containers on a user-defined Docker network
+- Agent established a TLS connection to the server (TLS 1.3) using client certs
+- Successfully proxied HTTP requests via `curl -x http://127.0.0.1:8080 http://example.com -I`
+- Limitation: HTTPS (CONNECT) is not implemented yet; use HTTP sites for testing
+
 ## Disclaimer
 
 ⚠️ **Important**: This tool is intended for legitimate use cases such as accessing necessary resources for work or personal use. Users are responsible for ensuring compliance with their organization's network policies and local laws. The developers are not responsible for any misuse of this software.
@@ -312,6 +326,36 @@ docker run --rm `
   -p 8443:8443 `
   fluidity-server `
   --config /root/config/server.yaml
+
+# Scratch images (recommended when base image pulls are blocked):
+# 1) Create a user-defined network so the agent can resolve the server by name
+docker network create fluidity-net
+
+# 2) Run the server (scratch image) with certs mounted and flags
+docker run --rm -d --name fluidity-server --network fluidity-net `
+  -p 8443:8443 `
+  -v ${PWD}\certs:/certs:ro `
+  fluidity-server `
+  --listen-addr 0.0.0.0 `
+  --listen-port 8443 `
+  --cert /certs/server.crt `
+  --key /certs/server.key `
+  --ca /certs/ca.crt `
+  --log-level debug `
+  --max-connections 100
+
+# 3) Run the agent (scratch image) with certs mounted and flags
+docker run --rm -d --name fluidity-agent --network fluidity-net `
+  -p 8080:8080 `
+  -v ${PWD}\certs:/certs:ro `
+  fluidity-agent `
+  --server-ip fluidity-server `
+  --server-port 8443 `
+  --cert /certs/client.crt `
+  --key /certs/client.key `
+  --ca /certs/ca.crt `
+  --proxy-port 8080 `
+  --log-level debug
 ```
 
 macOS/Linux (bash):
@@ -346,12 +390,51 @@ Tip:
 - Scratch images don't include system CA certificates. If the server or agent needs to make outbound HTTPS requests, prefer the standard images (Alpine-based) or mount a CA bundle into the container.
 - Standard images use `./fluidity-server` or `./fluidity-agent` as the entrypoint binary path
 - Scratch images use `/fluidity-server` or `/fluidity-agent` (absolute path, no shell)
+- Only HTTP is supported currently; HTTPS (CONNECT) is not implemented yet.
 
 ### 3. Configure Your Browser
-Set your browser's HTTP proxy to `localhost:8080`.
+Set your browser's HTTP proxy to `localhost:8080` (leave HTTPS blank for now; CONNECT not implemented).
 
 ### 4. Test Traffic
 Browse to any HTTP website. You should see logs in both the agent and server terminals showing requests and responses flowing through the tunnel.
+For a quick CLI check on Windows:
+
+```powershell
+curl.exe -x http://127.0.0.1:8080 http://example.com -I
+```
+
+## Simple Browser Test (Windows)
+
+Only HTTP sites are supported at the moment (HTTPS/CONNECT not implemented yet). Try one of these:
+
+- http://example.com
+- http://neverssl.com (handy for testing HTTP)
+
+### Chrome/Edge (use system proxy)
+
+1. Open Windows Settings → Network & Internet → Proxy
+2. Turn on “Use a proxy server”
+3. Address: `127.0.0.1`  Port: `8080`
+4. Apply/Save
+5. Open Chrome/Edge and browse to an HTTP site (e.g., `http://example.com`)
+6. Watch logs (optional):
+
+```powershell
+docker logs --tail 50 -f fluidity-agent
+docker logs --tail 50 -f fluidity-server
+```
+
+To revert: turn off “Use a proxy server” in Windows proxy settings.
+
+### Firefox (manual proxy)
+
+1. Firefox → Settings → General → Network Settings → Settings…
+2. Select “Manual proxy configuration”
+3. HTTP Proxy: `127.0.0.1`  Port: `8080`
+4. Leave HTTPS proxy empty (do not check “Use this proxy for all protocols”)
+5. OK, then browse to an HTTP site
+
+To revert: set “No proxy” or “Use system proxy settings”.
 
 ---
 

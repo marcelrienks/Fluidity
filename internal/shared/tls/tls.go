@@ -44,7 +44,7 @@ func LoadClientTLSConfig(certFile, keyFile, caFile string) (*tls.Config, error) 
 	config := &tls.Config{
 		Certificates: []tls.Certificate{cert},
 		RootCAs:      caCertPool,
-		MinVersion:   tls.VersionTLS12, // Try TLS 1.2 for debugging
+		MinVersion:   tls.VersionTLS13, // Enforce TLS 1.3 (matches docs)
 		ServerName:   "",               // Will be set dynamically
 	}
 
@@ -80,7 +80,7 @@ func LoadServerTLSConfig(certFile, keyFile, caFile string) (*tls.Config, error) 
 		Certificates: []tls.Certificate{cert},
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 		ClientCAs:    caCertPool,
-		MinVersion:   tls.VersionTLS12, // Try TLS 1.2 for debugging
+		MinVersion:   tls.VersionTLS13, // Enforce TLS 1.3 (matches docs)
 	}
 
 	logrus.WithFields(logrus.Fields{
