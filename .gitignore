@@ -14,3 +14,6 @@ certs/
 *.pfx
 *.p12
 *.srl
+
+# Build outputs
+build/
