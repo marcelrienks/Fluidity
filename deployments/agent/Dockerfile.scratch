@@ -1,0 +1,10 @@
+# Minimal runtime image with no base OS; requires statically-linked binary
+FROM scratch
+
+WORKDIR /
+
+COPY build/fluidity-agent /fluidity-agent
+
+EXPOSE 8080
+
+ENTRYPOINT ["/fluidity-agent"]

@@ -1,0 +1,14 @@
+# Minimal runtime image with no base OS; requires statically-linked binary
+FROM scratch
+
+# Set working directory (not strictly necessary for scratch)
+WORKDIR /
+
+# Copy prebuilt Linux binary (CGO_DISABLED=0) into image
+COPY build/fluidity-server /fluidity-server
+
+# Expose server port (adjust if needed)
+EXPOSE 8443
+
+# Default entrypoint; pass flags via `docker run` command arguments
+ENTRYPOINT ["/fluidity-server"]

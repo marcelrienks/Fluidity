@@ -1,0 +1,7 @@
+server_ip: "fluidity-server"
+server_port: 8443
+local_proxy_port: 8080
+cert_file: "./certs/client.crt"
+key_file: "./certs/client.key"
+ca_cert_file: "./certs/ca.crt"
+log_level: "debug"
