@@ -360,3 +360,4 @@ Browse to any HTTP website. You should see logs in both the agent and server ter
 - Logs will show traffic passing from browser → agent → server → website → back to browser.
 
 For advanced configuration, see the `configs/agent.local.yaml` and `configs/server.local.yaml` files.
+ 
