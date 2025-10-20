@@ -66,12 +66,7 @@ fmt:
 
 docker-build-agent:
 	@echo Building agent Docker image...
-	docker build -t fluidity-agent -f deployments/agent/Dockerfile . || \
-	(
-		echo Fallback to scratch image build... && \
-		$(MAKE) -f Makefile.win build-linux-agent && \
-		docker build -t fluidity-agent -f deployments/agent/Dockerfile.scratch .
-	)
+	@cmd /V:ON /C "(docker build -t fluidity-agent -f deployments/agent/Dockerfile .) || (echo Fallback to scratch image build... && $(MAKE) -f Makefile.win build-linux-agent && docker build -t fluidity-agent -f deployments/agent/Dockerfile.scratch .)"
 
 docker-build-agent-scratch: build-linux-agent
 	@echo Building agent Docker image (scratch)...
@@ -79,12 +74,7 @@ docker-build-agent-scratch: build-linux-agent
 
 docker-build-server:
 	@echo Building server Docker image...
-	docker build -t fluidity-server -f deployments/server/Dockerfile . || \
-	(
-		echo Fallback to scratch image build... && \
-		$(MAKE) -f Makefile.win build-linux-server && \
-		docker build -t fluidity-server -f deployments/server/Dockerfile.scratch .
-	)
+	@cmd /V:ON /C "(docker build -t fluidity-server -f deployments/server/Dockerfile .) || (echo Fallback to scratch image build... && $(MAKE) -f Makefile.win build-linux-server && docker build -t fluidity-server -f deployments/server/Dockerfile.scratch .)"
 
 docker-build-server-scratch: build-linux-server
 	@echo Building server Docker image (scratch)...
