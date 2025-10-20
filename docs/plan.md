@@ -38,10 +38,52 @@ This document outlines all outstanding work required for Phase 1, organized by p
 
 ---
 
-## Phase 1.5: Security & Integration Testing (Pre-Phase 2)
-- [ ] Security tool/EDR testing and mitigation
-- [ ] Comprehensive integration test suite
-- [ ] Performance and stress testing
+
+## Phase 2: Cloud Deployment
+
+### Deployment & Scaling
+- [ ] Deploy Tunnel Server to chosen cloud provider (AWS, Azure, GCP, etc.)
+- [ ] Implement container orchestration (Docker Compose, Kubernetes, or cloud container services)
+- [ ] Set up CI/CD pipeline for automated builds and deployments
+- [ ] Implement scaling and monitoring for cloud deployment
+
+### Configuration & Networking
+- [ ] Handle dynamic IP address changes for cloud deployments
+- [ ] Secure cloud networking and firewall rules
+
+---
+
+## Phase 3: Enhanced Features
+
+### Security & Certificates
+- [ ] Implement advanced mTLS authentication and certificate management
+- [ ] Set up private Certificate Authority (CA) infrastructure
+- [ ] Implement certificate generation and distribution system
+- [ ] Plan for certificate renewal and rotation
+
+### Configuration & Usability
+- [ ] Add advanced configuration options (CLI, environment variables, config files)
+- [ ] Improve persistent configuration storage and update mechanisms
+
+### Monitoring & Logging
+- [ ] Add monitoring endpoints and health checks
+- [ ] Enhance logging capabilities (structured, contextual, privacy-focused)
+
+---
+
+## Phase 4: Testing & Documentation
+
+### Testing
+- [ ] Comprehensive unit, integration, and performance tests
+- [ ] End-to-end test scenarios with real servers
+- [ ] Security audit and vulnerability assessment
+
+### Documentation
+- [ ] Complete user documentation and guides
+- [ ] Finalize troubleshooting and FAQ sections
+- [ ] Document cloud deployment and scaling procedures
+
+---
 
 ---
 
