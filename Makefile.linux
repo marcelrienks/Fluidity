@@ -12,7 +12,7 @@ BUILD_DIR=build
 AGENT_DIR=cmd/agent
 SERVER_DIR=cmd/server
 
-.PHONY: all build clean test deps run-agent-local run-server-local
+.PHONY: all build clean test deps run-agent-local run-server-local docker-build-agent docker-build-server
 
 all: clean deps build
 
@@ -54,3 +54,21 @@ test:
 fmt:
 	@echo "Formatting code..."
 	$(GOCMD) fmt ./...
+
+docker-build-agent:
+	@echo "Building agent Docker image..."
+	docker build -t fluidity-agent -f deployments/agent/Dockerfile . || \
+	(
+		echo "Falling back to scratch image build (requires prebuilt Linux binary)" && \
+		GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GOBUILD) -o $(BUILD_DIR)/fluidity-agent ./$(AGENT_DIR) && \
+		docker build -t fluidity-agent -f deployments/agent/Dockerfile.scratch .
+	)
+
+docker-build-server:
+	@echo "Building server Docker image..."
+	docker build -t fluidity-server -f deployments/server/Dockerfile . || \
+	(
+		echo "Falling back to scratch image build (requires prebuilt Linux binary)" && \
+		GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GOBUILD) -o $(BUILD_DIR)/fluidity-server ./$(SERVER_DIR) && \
+		docker build -t fluidity-server -f deployments/server/Dockerfile.scratch .
+	)
