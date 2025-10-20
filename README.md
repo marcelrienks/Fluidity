@@ -33,12 +33,15 @@ This architecture enables HTTP traffic to bypass restrictive corporate firewalls
 
 ## Key Features (Planned)
 
-- **Go-based Implementation**: Both server and agent written in Go for performance and cross-platform compatibility
+- **Go-based Implementation**: Both Tunnel Server (cloud) and Tunnel Agent (local) written in Go for performance and cross-platform compatibility
 - **Containerized Deployment**: Docker containers for easy deployment and management
-- **Cloud-hosted Server**: Deployed to major cloud service providers for reliability and global access
-- **Local Agent**: Runs within Docker Desktop for easy local setup and management
+- **Cloud-hosted Tunnel Server**: Deployed to major cloud service providers for reliability and global access
+- **Local Tunnel Agent**: Runs within Docker Desktop for easy local setup and management
 - **HTTP Traffic Tunneling**: Secure routing of HTTP requests through the tunnel
 - **Firewall Bypass**: Designed to work around restrictive corporate network policies
+- **Planned Protocol Support**: HTTPS/CONNECT tunneling and WebSocket support (see [PRD](docs/PRD.md) for requirements)
+
+> **Note:** HTTPS/CONNECT and WebSocket tunneling are requirements per the [Product Requirements Document](docs/PRD.md), but are not yet implemented. These are planned for future phases.
 
 ## Technology Stack
 
@@ -49,22 +52,18 @@ This architecture enables HTTP traffic to bypass restrictive corporate firewalls
 
 ## Current Status
 
-Core infrastructure is up and running for local development and Docker containers:
 
-- Agent runs a local HTTP proxy on port 8080
-- Agent connects to server over mTLS using dev certificates (generated with the provided scripts)
-- Server accepts client-authenticated TLS and forwards HTTP requests to target sites
-- End-to-end HTTP browsing via the agent proxy is verified (HTTP only; HTTPS/CONNECT not implemented yet)
+- Tunnel Agent runs a local HTTP proxy on port 8080
+- Tunnel Agent connects to Tunnel Server over mTLS using dev certificates (generated with the provided scripts)
+- Tunnel Server accepts client-authenticated TLS and forwards HTTP requests to target sites
+- End-to-end HTTP browsing via the agent proxy is verified (**HTTP only**; HTTPS/CONNECT and WebSocket not implemented yet—see [PRD](docs/PRD.md) for roadmap)
 
-### Roadmap
 
-1. **Architecture Design** - Define detailed system architecture and communication protocols
-2. **Server Development** - Implement the Go-based tunnel server
-3. **Agent Development** - Implement the Go-based tunnel agent
-4. **Containerization** - Create Docker images for both components
-5. **Cloud Deployment** - Deploy server to chosen cloud provider
-6. **Testing & Validation** - Comprehensive testing of tunnel functionality
-7. **Documentation** - Complete user guides and deployment instructions
+## Project Planning & Architecture
+
+For all outstanding work, phase steps, and actionable items, see the [Project Plan](docs/plan.md).
+
+For technical architecture details, see the [Architecture Design](docs/architecture.md).
 
 ## Prerequisites
 
@@ -214,6 +213,10 @@ Validated end-to-end HTTP tunneling via Docker containers (scratch images) with 
 ## Disclaimer
 
 ⚠️ **Important**: This tool is intended for legitimate use cases such as accessing necessary resources for work or personal use. Users are responsible for ensuring compliance with their organization's network policies and local laws. The developers are not responsible for any misuse of this software.
+
+---
+
+For a full list of requirements and planned features, see the [Product Requirements Document (PRD)](docs/PRD.md).
 
 ## Quick Start Guide (Local Development)
 
