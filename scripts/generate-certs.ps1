@@ -35,6 +35,7 @@ try {
 authorityKeyIdentifier=keyid,issuer
 basicConstraints=CA:FALSE
 keyUsage = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment
+extendedKeyUsage = serverAuth
 subjectAltName = @alt_names
 
 [alt_names]
@@ -45,7 +46,7 @@ IP.2 = ::1
 "@ | Out-File -FilePath "$CertsDir\server.ext" -Encoding ascii
     
     Write-Host "6. Generating server certificate..." -ForegroundColor Yellow
-    & openssl x509 -req -in "$CertsDir\server.csr" -CA "$CertsDir\ca.crt" -CAkey "$CertsDir\ca.key" -CAcreateserial -out "$CertsDir\server.crt" -days $Days -extensions v3_req -extfile "$CertsDir\server.ext"
+    & openssl x509 -req -in "$CertsDir\server.csr" -CA "$CertsDir\ca.crt" -CAkey "$CertsDir\ca.key" -CAcreateserial -out "$CertsDir\server.crt" -days $Days -extfile "$CertsDir\server.ext"
     
     Write-Host "7. Generating client private key..." -ForegroundColor Yellow
     & openssl genrsa -out "$CertsDir\client.key" 4096
@@ -53,11 +54,20 @@ IP.2 = ::1
     Write-Host "8. Generating client CSR..." -ForegroundColor Yellow
     & openssl req -new -key "$CertsDir\client.key" -out "$CertsDir\client.csr" -subj "/C=US/ST=CA/L=SF/O=Fluidity/OU=Client/CN=fluidity-client"
     
-    Write-Host "9. Generating client certificate..." -ForegroundColor Yellow
-    & openssl x509 -req -in "$CertsDir\client.csr" -CA "$CertsDir\ca.crt" -CAkey "$CertsDir\ca.key" -CAcreateserial -out "$CertsDir\client.crt" -days $Days
+    # Create client certificate extensions file
+    Write-Host "9. Creating client extensions file..." -ForegroundColor Yellow
+    @"
+authorityKeyIdentifier=keyid,issuer
+basicConstraints=CA:FALSE
+keyUsage = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment
+extendedKeyUsage = clientAuth
+"@ | Out-File -FilePath "$CertsDir\client.ext" -Encoding ascii
+    
+    Write-Host "10. Generating client certificate..." -ForegroundColor Yellow
+    & openssl x509 -req -in "$CertsDir\client.csr" -CA "$CertsDir\ca.crt" -CAkey "$CertsDir\ca.key" -CAcreateserial -out "$CertsDir\client.crt" -days $Days -extfile "$CertsDir\client.ext"
     
     # Clean up temporary files
-    Remove-Item "$CertsDir\server.csr", "$CertsDir\server.ext", "$CertsDir\client.csr" -ErrorAction SilentlyContinue
+    Remove-Item "$CertsDir\server.csr", "$CertsDir\server.ext", "$CertsDir\client.csr", "$CertsDir\client.ext" -ErrorAction SilentlyContinue
     
     Write-Host "Certificates generated successfully!" -ForegroundColor Green
     Write-Host ""

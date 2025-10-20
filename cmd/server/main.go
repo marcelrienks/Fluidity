@@ -28,6 +28,9 @@ var (
 )
 
 func main() {
+	// Note: GODEBUG must be set BEFORE the Go runtime initializes
+	// Use run-server-debug.cmd to launch with TLS debug logging enabled
+
 	rootCmd := &cobra.Command{
 		Use:   "fluidity-server",
 		Short: "Fluidity tunnel server",

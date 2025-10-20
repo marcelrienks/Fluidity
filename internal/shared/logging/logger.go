@@ -1,6 +1,9 @@
 package logging
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"os"
 
 	"github.com/sirupsen/logrus"
@@ -12,26 +15,77 @@ type Logger struct {
 	component string
 }
 
+// OrderedJSONFormatter formats logs as JSON with consistent field ordering
+type OrderedJSONFormatter struct {
+	TimestampFormat string
+}
+
+// Format renders a single log entry with consistent field order
+func (f *OrderedJSONFormatter) Format(entry *logrus.Entry) ([]byte, error) {
+	// Fixed order: timestamp, level, component, message, then custom fields
+	var buf bytes.Buffer
+	buf.WriteString("{")
+
+	// 1. Timestamp
+	timestampFormat := f.TimestampFormat
+	if timestampFormat == "" {
+		timestampFormat = "2006-01-02T15:04:05.000Z"
+	}
+	fmt.Fprintf(&buf, `"timestamp":"%s",`, entry.Time.Format(timestampFormat))
+
+	// 2. Level
+	fmt.Fprintf(&buf, `"level":"%s",`, entry.Level.String())
+
+	// 3. Component (if present)
+	if component, ok := entry.Data["component"]; ok {
+		componentJSON, _ := json.Marshal(component)
+		fmt.Fprintf(&buf, `"component":%s,`, componentJSON)
+		delete(entry.Data, "component") // Remove so we don't duplicate later
+	}
+
+	// 4. Message
+	messageJSON, _ := json.Marshal(entry.Message)
+	fmt.Fprintf(&buf, `"message":%s`, messageJSON)
+
+	// 5. Error (if present from logrus.WithError, it's in Data with key "error")
+	if err, ok := entry.Data[logrus.ErrorKey]; ok {
+		// Handle error specially to ensure it's a string
+		var errStr string
+		if e, isErr := err.(error); isErr {
+			errStr = e.Error()
+		} else {
+			errStr = fmt.Sprintf("%v", err)
+		}
+		errJSON, _ := json.Marshal(errStr)
+		fmt.Fprintf(&buf, `,"error":%s`, errJSON)
+		delete(entry.Data, logrus.ErrorKey)
+	} // 6. All other custom fields in sorted order for consistency
+	if len(entry.Data) > 0 {
+		for key, value := range entry.Data {
+			valueJSON, _ := json.Marshal(value)
+			fmt.Fprintf(&buf, `,"%s":%s`, key, valueJSON)
+		}
+	}
+
+	buf.WriteString("}\n")
+	return buf.Bytes(), nil
+}
+
 // NewLogger creates a new logger instance for a component
 func NewLogger(component string) *Logger {
 	logger := logrus.New()
-	
+
 	// Set default log level to Info
 	logger.SetLevel(logrus.InfoLevel)
-	
-	// Use JSON formatter for structured logs
-	logger.SetFormatter(&logrus.JSONFormatter{
+
+	// Use custom ordered JSON formatter
+	logger.SetFormatter(&OrderedJSONFormatter{
 		TimestampFormat: "2006-01-02T15:04:05.000Z",
-		FieldMap: logrus.FieldMap{
-			logrus.FieldKeyTime:  "timestamp",
-			logrus.FieldKeyLevel: "level",
-			logrus.FieldKeyMsg:   "message",
-		},
 	})
-	
+
 	// Output to stdout
 	logger.SetOutput(os.Stdout)
-	
+
 	return &Logger{
 		Logger:    logger,
 		component: component,
@@ -100,12 +154,12 @@ func (l *Logger) addFields(entry *logrus.Entry, fields ...interface{}) *logrus.E
 	if len(fields)%2 != 0 {
 		fields = append(fields, "")
 	}
-	
+
 	for i := 0; i < len(fields); i += 2 {
 		if key, ok := fields[i].(string); ok {
 			entry = entry.WithField(key, fields[i+1])
 		}
 	}
-	
+
 	return entry
 }

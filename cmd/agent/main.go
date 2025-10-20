@@ -19,17 +19,20 @@ import (
 )
 
 var (
-	configFile   string
-	serverIP     string
-	serverPort   int
-	proxyPort    int
-	logLevel     string
-	certFile     string
-	keyFile      string
-	caCertFile   string
+	configFile string
+	serverIP   string
+	serverPort int
+	proxyPort  int
+	logLevel   string
+	certFile   string
+	keyFile    string
+	caCertFile string
 )
 
 func main() {
+	// Note: GODEBUG must be set BEFORE the Go runtime initializes
+	// Use run-agent-debug.cmd to launch with TLS debug logging enabled
+
 	rootCmd := &cobra.Command{
 		Use:   "fluidity-agent",
 		Short: "Fluidity tunnel agent",

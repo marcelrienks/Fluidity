@@ -11,26 +11,26 @@ import (
 
 	"fluidity/internal/shared/logging"
 	"fluidity/internal/shared/protocol"
-)
 
-// Client manages the tunnel connection to server
+	"github.com/sirupsen/logrus"
+) // Client manages the tunnel connection to server
 type Client struct {
-	config       *tls.Config
-	serverAddr   string
-	conn         *tls.Conn
-	mu           sync.RWMutex
-	requests     map[string]chan *protocol.Response
-	logger       *logging.Logger
-	ctx          context.Context
-	cancel       context.CancelFunc
-	connected    bool
-	reconnectCh  chan bool
+	config      *tls.Config
+	serverAddr  string
+	conn        *tls.Conn
+	mu          sync.RWMutex
+	requests    map[string]chan *protocol.Response
+	logger      *logging.Logger
+	ctx         context.Context
+	cancel      context.CancelFunc
+	connected   bool
+	reconnectCh chan bool
 }
 
 // NewClient creates a new tunnel client
 func NewClient(tlsConfig *tls.Config, serverAddr string) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &Client{
 		config:      tlsConfig,
 		serverAddr:  serverAddr,
@@ -46,30 +46,51 @@ func NewClient(tlsConfig *tls.Config, serverAddr string) *Client {
 func (c *Client) Connect() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	if c.connected {
 		return nil
 	}
-	
+
 	c.logger.Info("Connecting to tunnel server", "addr", c.serverAddr)
-	
-	// Set server name for TLS verification if using IP
-	if net.ParseIP(c.extractHost(c.serverAddr)) != nil {
-		c.config.InsecureSkipVerify = true // For IP-based connections in development
+
+	// Extract hostname for ServerName
+	host := c.extractHost(c.serverAddr)
+
+	// Create TLS config with client certificate
+	tlsConfig := &tls.Config{
+		Certificates: c.config.Certificates,
+		RootCAs:      c.config.RootCAs,
+		MinVersion:   c.config.MinVersion,
+		ServerName:   host, // CRITICAL: Set ServerName for proper mTLS handshake
 	}
-	
-	conn, err := tls.Dial("tcp", c.serverAddr, c.config)
+
+	c.logger.WithFields(logrus.Fields{
+		"num_certificates": len(tlsConfig.Certificates),
+		"has_root_cas":     tlsConfig.RootCAs != nil,
+		"server_name":      tlsConfig.ServerName,
+	}).Info("TLS config for dial")
+
+	conn, err := tls.Dial("tcp", c.serverAddr, tlsConfig)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
 	}
-	
+
+	// Log the connection state
+	state := conn.ConnectionState()
+	c.logger.WithFields(logrus.Fields{
+		"version":            state.Version,
+		"cipher_suite":       state.CipherSuite,
+		"peer_certificates":  len(state.PeerCertificates),
+		"local_certificates": len(tlsConfig.Certificates),
+	}).Info("TLS connection established")
+
 	c.conn = conn
 	c.connected = true
 	c.logger.Info("Connected to tunnel server", "addr", c.serverAddr)
-	
+
 	// Start response handler
 	go c.handleResponses()
-	
+
 	return nil
 }
 
@@ -77,19 +98,19 @@ func (c *Client) Connect() error {
 func (c *Client) Disconnect() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	if !c.connected {
 		return nil
 	}
-	
+
 	c.connected = false
 	c.cancel()
-	
+
 	if c.conn != nil {
 		c.conn.Close()
 		c.conn = nil
 	}
-	
+
 	c.logger.Info("Disconnected from tunnel server")
 	return nil
 }
@@ -103,13 +124,13 @@ func (c *Client) SendRequest(req *protocol.Request) (*protocol.Response, error) 
 	}
 	conn := c.conn
 	c.mu.RUnlock()
-	
+
 	// Create response channel
 	respChan := make(chan *protocol.Response, 1)
 	c.mu.Lock()
 	c.requests[req.ID] = respChan
 	c.mu.Unlock()
-	
+
 	// Send request
 	encoder := json.NewEncoder(conn)
 	if err := encoder.Encode(req); err != nil {
@@ -118,9 +139,9 @@ func (c *Client) SendRequest(req *protocol.Request) (*protocol.Response, error) 
 		c.mu.Unlock()
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
-	
+
 	c.logger.Debug("Sent request through tunnel", "id", req.ID, "url", req.URL)
-	
+
 	// Wait for response
 	select {
 	case resp := <-respChan:
@@ -149,42 +170,42 @@ func (c *Client) handleResponses() {
 			delete(c.requests, id)
 		}
 		c.mu.Unlock()
-		
+
 		// Signal reconnection needed
 		select {
 		case c.reconnectCh <- true:
 		default:
 		}
 	}()
-	
+
 	decoder := json.NewDecoder(c.conn)
-	
+
 	for {
 		select {
 		case <-c.ctx.Done():
 			return
 		default:
 		}
-		
+
 		var resp protocol.Response
 		if err := decoder.Decode(&resp); err != nil {
 			c.logger.Error("Failed to decode response", err)
 			return
 		}
-		
+
 		c.logger.Debug("Received response from tunnel", "id", resp.ID, "status", resp.StatusCode)
-		
+
 		c.mu.RLock()
 		respChan, exists := c.requests[resp.ID]
 		c.mu.RUnlock()
-		
+
 		if exists {
 			select {
 			case respChan <- &resp:
 			case <-time.After(1 * time.Second):
 				c.logger.Warn("Response channel blocked", "id", resp.ID)
 			}
-			
+
 			c.mu.Lock()
 			delete(c.requests, resp.ID)
 			c.mu.Unlock()
