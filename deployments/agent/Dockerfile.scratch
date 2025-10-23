@@ -1,5 +1,8 @@
-# Minimal runtime image with no base OS; requires statically-linked binary
-FROM scratch
+# Production Dockerfile using distroless base-debian12
+# Recommended: includes ca-certificates + libc for DNS resolution
+# Image size: ~34MB base + ~23MB binary = ~57MB total
+# Previous scratch-based images failed DNS resolution and HTTPS requests
+FROM gcr.io/distroless/base-debian12:latest
 
 WORKDIR /
 

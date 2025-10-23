@@ -149,16 +149,17 @@ Fluidity provides OS-specific Makefiles for building and running the project. Al
 - Uses multi-stage Dockerfile with `golang:1.21-alpine` builder and `alpine:latest` runtime
 - Includes system CA certificates for outbound HTTPS
 - Suitable for production deployment
-- Requires Docker Hub access to pull base images
-- Image size: ~20-30MB
+- Image size: ~57MB (34MB base + 23MB binary)
 
-**Docker Images - Scratch** (`docker-build-*-scratch`):
+**Docker Images - Production Recommended** (`docker-build-*-scratch`):
+- Uses distroless/base-debian12 from Google Container Registry
+- Includes ca-certificates and libc (glibc) for DNS resolution
+- No shell, no package manager - minimal attack surface
 - Cross-compiles static Linux binary (`GOOS=linux GOARCH=amd64 CGO_ENABLED=0`)
-- Builds from `scratch` (no base OS, just the binary)
-- No shell, no package manager, no CA certificates
-- Useful when Docker Hub pulls are blocked
-- Image size: ~14MB
-- Note: Cannot make outbound HTTPS calls unless you mount CA certificates
+- Image size: ~57MB
+- **Recommended for production** - secure and fully functional
+
+**Note**: Previous scratch-based images (~14MB) could not perform DNS resolution or outbound HTTPS requests. The distroless/base images add minimal overhead but ensure full functionality.
 
 ### Quick Command Reference
 
