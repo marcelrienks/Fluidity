@@ -13,7 +13,7 @@ import (
 func LoadConfig[T any](configFile string, overrides map[string]interface{}) (*T, error) {
 	// Initialize viper
 	v := viper.New()
-	
+
 	// Set config file
 	if configFile != "" {
 		v.SetConfigFile(configFile)
@@ -25,10 +25,10 @@ func LoadConfig[T any](configFile string, overrides map[string]interface{}) (*T,
 		v.AddConfigPath("./configs")
 		v.AddConfigPath("$HOME/.fluidity")
 	}
-	
+
 	// Set defaults
 	setDefaults(v)
-	
+
 	// Read config file if it exists
 	if err := v.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
@@ -36,23 +36,23 @@ func LoadConfig[T any](configFile string, overrides map[string]interface{}) (*T,
 		}
 		// Config file not found is OK, we'll use defaults and environment variables
 	}
-	
+
 	// Apply CLI overrides
 	for key, value := range overrides {
 		if value != nil {
 			v.Set(key, value)
 		}
 	}
-	
+
 	// Environment variable support
 	v.AutomaticEnv()
 	v.SetEnvPrefix("FLUIDITY")
-	
+
 	var config T
 	if err := v.Unmarshal(&config); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
-	
+
 	return &config, nil
 }
 
@@ -85,7 +85,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("agent.cert_file", "./certs/client.crt")
 	v.SetDefault("agent.key_file", "./certs/client.key")
 	v.SetDefault("agent.ca_cert_file", "./certs/ca.crt")
-	
+
 	// Server defaults
 	v.SetDefault("server.listen_addr", "0.0.0.0")
 	v.SetDefault("server.listen_port", 8443)

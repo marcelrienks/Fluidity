@@ -31,13 +31,14 @@ This architecture enables HTTP traffic to bypass restrictive corporate firewalls
 └───────────────────┘
 ```
 
-## Key Features (Planned)
+## Key Features
 
 - **Go-based Implementation**: Both server and agent written in Go for performance and cross-platform compatibility
 - **Containerized Deployment**: Docker containers for easy deployment and management
 - **Cloud-hosted Server**: Deployed to major cloud service providers for reliability and global access
 - **Local Agent**: Runs within Docker Desktop for easy local setup and management
-- **HTTP Traffic Tunneling**: Secure routing of HTTP requests through the tunnel
+- **HTTP/HTTPS Traffic Tunneling**: Secure routing of both HTTP and HTTPS requests through the tunnel via CONNECT
+- **mTLS Authentication**: Mutual TLS authentication with private CA for secure, authenticated connections
 - **Firewall Bypass**: Designed to work around restrictive corporate network policies
 
 ## Technology Stack
@@ -51,10 +52,11 @@ This architecture enables HTTP traffic to bypass restrictive corporate firewalls
 
 Core infrastructure is up and running for local development and Docker containers:
 
-- Agent runs a local HTTP proxy on port 8080
+- Agent runs a local HTTP/HTTPS proxy on port 8080
 - Agent connects to server over mTLS using dev certificates (generated with the provided scripts)
-- Server accepts client-authenticated TLS and forwards HTTP requests to target sites
-- End-to-end HTTP browsing via the agent proxy is verified (HTTP only; HTTPS/CONNECT not implemented yet)
+- Server accepts client-authenticated TLS and forwards HTTP/HTTPS requests to target sites
+- End-to-end HTTP and HTTPS browsing via the agent proxy is verified and working
+- HTTPS CONNECT tunneling fully implemented for secure website access
 
 ### Roadmap
 
@@ -202,14 +204,16 @@ make -f Makefile.linux docker-build-agent
 
 > **Note:** The default `Makefile` is for reference only. Always use the OS-specific Makefile for your environment.
 
-## Current Progress (Oct 20, 2025)
+## Current Progress (Oct 23, 2025)
 
-Validated end-to-end HTTP tunneling via Docker containers (scratch images) with dev mTLS certs:
+Validated end-to-end HTTP and HTTPS tunneling via Docker containers with dev mTLS certs:
 
 - Built and ran server and agent containers on a user-defined Docker network
 - Agent established a TLS connection to the server (TLS 1.3) using client certs
 - Successfully proxied HTTP requests via `curl -x http://127.0.0.1:8080 http://example.com -I`
-- Limitation: HTTPS (CONNECT) is not implemented yet; use HTTP sites for testing
+- ✅ **HTTPS CONNECT tunneling fully implemented and working**
+- Successfully proxied HTTPS requests via `curl -x http://127.0.0.1:8080 https://example.com -I`
+- Full web browsing support for both HTTP and HTTPS websites
 
 ## Disclaimer
 
@@ -390,33 +394,39 @@ Tip:
 - Scratch images don't include system CA certificates. If the server or agent needs to make outbound HTTPS requests, prefer the standard images (Alpine-based) or mount a CA bundle into the container.
 - Standard images use `./fluidity-server` or `./fluidity-agent` as the entrypoint binary path
 - Scratch images use `/fluidity-server` or `/fluidity-agent` (absolute path, no shell)
-- Only HTTP is supported currently; HTTPS (CONNECT) is not implemented yet.
+- Both HTTP and HTTPS are fully supported via CONNECT tunneling.
 
 ### 3. Configure Your Browser
-Set your browser's HTTP proxy to `localhost:8080` (leave HTTPS blank for now; CONNECT not implemented).
+Set your browser's HTTP **and HTTPS** proxy to `localhost:8080`. Both protocols are fully supported.
 
 ### 4. Test Traffic
-Browse to any HTTP website. You should see logs in both the agent and server terminals showing requests and responses flowing through the tunnel.
+Browse to any HTTP or HTTPS website. You should see logs in both the agent and server terminals showing requests and responses flowing through the tunnel.
 For a quick CLI check on Windows:
 
 ```powershell
+# Test HTTP
 curl.exe -x http://127.0.0.1:8080 http://example.com -I
+
+# Test HTTPS
+curl.exe -x http://127.0.0.1:8080 https://example.com -I
 ```
 
 ## Simple Browser Test (Windows)
 
-Only HTTP sites are supported at the moment (HTTPS/CONNECT not implemented yet). Try one of these:
+Both HTTP and HTTPS sites are fully supported. Try any of these:
 
+- https://google.com
+- https://github.com
 - http://example.com
-- http://neverssl.com (handy for testing HTTP)
+- http://neverssl.com
 
 ### Chrome/Edge (use system proxy)
 
 1. Open Windows Settings → Network & Internet → Proxy
-2. Turn on “Use a proxy server”
+2. Turn on "Use a proxy server"
 3. Address: `127.0.0.1`  Port: `8080`
 4. Apply/Save
-5. Open Chrome/Edge and browse to an HTTP site (e.g., `http://example.com`)
+5. Open Chrome/Edge and browse to any HTTP or HTTPS site (e.g., `https://google.com`)
 6. Watch logs (optional):
 
 ```powershell
@@ -429,18 +439,20 @@ To revert: turn off “Use a proxy server” in Windows proxy settings.
 ### Firefox (manual proxy)
 
 1. Firefox → Settings → General → Network Settings → Settings…
-2. Select “Manual proxy configuration”
+2. Select "Manual proxy configuration"
 3. HTTP Proxy: `127.0.0.1`  Port: `8080`
-4. Leave HTTPS proxy empty (do not check “Use this proxy for all protocols”)
-5. OK, then browse to an HTTP site
+4. HTTPS Proxy: `127.0.0.1`  Port: `8080`
+5. OR check "Use this proxy server for all protocols"
+6. OK, then browse to any HTTP or HTTPS site
 
-To revert: set “No proxy” or “Use system proxy settings”.
+To revert: set "No proxy" or "Use system proxy settings".
 
 ---
 
 - The agent connects to the server at `127.0.0.1:8443`.
 - Both agent and server run locally for easy debugging.
 - Logs will show traffic passing from browser → agent → server → website → back to browser.
+- Full support for both HTTP and HTTPS websites via CONNECT tunneling.
 
 For advanced configuration, see the `configs/agent.local.yaml` and `configs/server.local.yaml` files.
  

@@ -38,9 +38,9 @@ This document describes the Phase 1 implementation of Fluidity, which includes t
 - ⚠️ **No Authentication**: mTLS setup exists but certificates need to be generated
 
 ### Protocol Support
-- ⚠️ **HTTP Only**: Only supports regular HTTP requests
-- ⚠️ **No CONNECT**: HTTPS tunneling (CONNECT method) not implemented
-- ⚠️ **No WebSocket**: WebSocket support not implemented
+- ✅ **HTTP Support**: Full support for regular HTTP requests
+- ✅ **HTTPS CONNECT**: HTTPS tunneling via CONNECT method fully implemented
+- ⚠️ **No WebSocket**: WebSocket support not implemented yet
 
 ### Error Handling
 - ⚠️ **Basic Error Handling**: Minimal error handling and recovery
@@ -182,39 +182,51 @@ make test
 make fmt
 ```
 
-## What's Next (Phase 1.5 - Before Phase 2)
+## What's Next - Phase 2 Goals
 
-### Security Testing & Validation
-1. **EDR/Security Tool Testing**: Test functionality against endpoint detection tools
-   - Analyze behavior with CrowdStrike, Carbon Black, Windows Defender, etc.
-   - Identify potential security tool triggers or alerts
-   - Document any detection patterns or behavioral analysis concerns
+### Cloud Deployment (Priority)
+1. **Cloud Provider Selection**: Choose and configure cloud provider
+   - Evaluate AWS, Azure, GCP, DigitalOcean
+   - Compare costs and features
+   - Set up cloud account and billing
    
-2. **Security Tool Mitigation**: Implement changes to avoid triggering security monitoring
-   - Adjust network communication patterns if needed
-   - Review and optimize process behavior and resource usage
-   - Ensure legitimate use patterns don't trigger false positives
+2. **Infrastructure as Code**: Create deployment automation
+   - Terraform or Bicep templates
+   - Network and security configuration
+   - Container service setup
    
-3. **Integration Testing**: Develop comprehensive integration test suite
-   - End-to-end HTTP request/response testing
-   - End-to-end HTTPS CONNECT tunneling testing
-   - Connection recovery and error handling scenarios
-   - Certificate validation and mTLS authentication flows
-   - Multi-request concurrent handling tests
-   - Performance and stress testing
+3. **Initial Cloud Deployment**: Deploy server to cloud
+   - Deploy containerized server
+   - Configure networking and firewall
+   - Test connectivity from local agent
+   - Verify end-to-end functionality
 
-### Phase 2 Goals (After Phase 1.5)
+### Phase 3 Goals (After Phase 2)
 
-1. **Cloud Deployment**: Deploy to chosen cloud provider
-2. **WebSocket Support**: Add WebSocket protocol support
-3. **Enhanced Security**: Improve certificate management and validation
-4. **Better Error Handling**: Add circuit breakers and improved retry logic
-5. **Performance Optimization**: Connection pooling and request optimization
+1. **WebSocket Support**: Add WebSocket protocol support
+2. **Enhanced Certificate Management**: Certificate rotation and monitoring
+3. **Better Error Handling**: Add circuit breakers and improved retry logic
+4. **Performance Optimization**: Connection pooling and request optimization
+5. **Advanced Configuration**: Hot-reload and validation features
+
+### Phase 4 Goals (Security Hardening)
+
+1. **EDR/Security Tool Testing**: Test against endpoint detection tools
+2. **Security Analysis**: Analyze and document security behavior
+3. **Security Mitigations**: Implement changes to avoid false positives
+4. **Security Audit**: Vulnerability scanning and penetration testing
+
+### Phase 5 Goals (Testing & Documentation)
+
+1. **Automated Testing**: Comprehensive unit and integration test suite
+2. **Test Automation**: CI/CD pipeline with automated testing
+3. **Complete Documentation**: User guides, API docs, runbooks
+4. **Performance Testing**: Load testing and optimization
 
 ## Known Issues
 
 1. **Certificate Generation**: Certificates must be generated manually before first run
-2. **HTTPS Tunneling**: Browser HTTPS requests will fail (CONNECT not implemented)
+2. **WebSocket Support**: WebSocket protocol not yet implemented
 3. **Error Recovery**: Limited error recovery and user feedback
 4. **Platform Specific**: Certificate generation script requires OpenSSL
 
@@ -239,16 +251,22 @@ For more details, see the main project documentation and architecture documents.
 
 ---
 
-## Progress Update — 2025-10-20
+## Progress Update — 2025-10-23
 
 - Built and ran Docker scratch images for both server and agent
 - Generated development mTLS certificates via `scripts/generate-certs.ps1`
 - Started containers on a user-defined Docker network (`fluidity-net`)
 - Agent successfully established a TLS connection (TLS 1.3) to the server using client certs
-- Verified end-to-end HTTP proxying with:
+- ✅ Verified end-to-end HTTP proxying:
 
   ```powershell
   curl.exe -x http://127.0.0.1:8080 http://example.com -I
   ```
 
-- Current limitation remains: HTTPS tunneling (CONNECT) not implemented yet — test with HTTP sites
+- ✅ **HTTPS CONNECT tunneling fully implemented and verified:**
+
+  ```powershell
+  curl.exe -x http://127.0.0.1:8080 https://example.com -I
+  ```
+
+- Full web browsing support for both HTTP and HTTPS websites confirmed working
