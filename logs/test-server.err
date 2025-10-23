@@ -1,0 +1,1 @@
+time="2025-10-23T14:02:52+02:00" level=info msg="Created server TLS config" client_auth=RequireAndVerifyClientCert has_client_cas=true min_version="TLS 1.3" num_certificates=1

@@ -1,0 +1,8 @@
+{"timestamp":"2025-10-23T14:02:52.585Z","level":"info","component":"server","message":"Starting Fluidity tunnel server","max_connections":10,"listen_addr":"127.0.0.1:8443","log_level":"debug"}
+{"timestamp":"2025-10-23T14:02:52.593Z","level":"info","component":"server","message":"Loaded TLS configuration","ca_file":"./certs/ca.crt","key_file":"./certs/server.key","cert_file":"./certs/server.crt"}
+{"timestamp":"2025-10-23T14:02:52.597Z","level":"info","component":"server","message":"Tunnel server started successfully"}
+{"timestamp":"2025-10-23T14:02:52.598Z","level":"info","component":"tunnel-server","message":"Tunnel server starting","addr":{"IP":"127.0.0.1","Port":8443,"Zone":""}}
+{"timestamp":"2025-10-23T14:02:56.937Z","level":"info","component":"tunnel-server","message":"Client connected","client":"fluidity-client","cert_info":{"issuer":"Fluidity-CA","not_after":"2027-10-20T11:56:05Z","not_before":"2025-10-20T11:56:05Z","serial":"400977580325601466236143197845747379415247939424","subject":"fluidity-client"}}
+{"timestamp":"2025-10-23T14:02:59.924Z","level":"info","component":"tunnel-server","message":"Forwarding request","method":"GET","domain":"httpbin.org","id":"6b3311fc3e2b4093"}
+{"timestamp":"2025-10-23T14:03:05.133Z","level":"info","component":"tunnel-server","message":"CONNECT open request","address":"api.github.com:443","id":"a68efaffa3d23939"}
+{"timestamp":"2025-10-23T14:08:05.271Z","level":"info","component":"tunnel-server","message":"Forwarding request","id":"e8d4e37abd5a351b","domain":"example.com","method":"GET"}

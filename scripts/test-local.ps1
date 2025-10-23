@@ -24,7 +24,7 @@ $agentProcess = $null
 
 Write-Host "`n=== Fluidity Local Binary Test ===" -ForegroundColor Magenta
 
-cleanup() {
+function cleanup {
     Write-Host "`nCleaning up processes..." -ForegroundColor Yellow
     
     if ($serverProcess -and -not $serverProcess.HasExited) {
