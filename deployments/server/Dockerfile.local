@@ -1,0 +1,17 @@
+# Server Dockerfile for local builds
+# Uses pre-built binary from build/ directory
+# Using distroless base which includes ca-certificates and libc for DNS resolution
+# Note: Debian-based but still minimal (~20MB vs Alpine ~7MB, but Alpine has cert issues)
+FROM gcr.io/distroless/base-debian11:latest
+
+# Create app directory
+WORKDIR /root/
+
+# Copy pre-built binary
+COPY build/fluidity-server .
+
+# Expose server port
+EXPOSE 8443
+
+# Command to run
+ENTRYPOINT ["./fluidity-server"]
