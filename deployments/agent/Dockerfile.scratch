@@ -1,13 +1,15 @@
-# Production Dockerfile using distroless base-debian12
-# Recommended: includes ca-certificates + libc for DNS resolution
-# Image size: ~34MB base + ~23MB binary = ~57MB total
-# Previous scratch-based images failed DNS resolution and HTTPS requests
-FROM gcr.io/distroless/base-debian12:latest
+# Production Dockerfile - Recommended: alpine/curl base
+# Optimal balance of size and functionality for Go networking applications
+# Image size: ~21MB base + ~23MB binary = ~43MB total
+# Includes: ca-certificates-bundle, curl, musl libc (all required for outbound HTTPS)
+# Alternative: gcr.io/distroless/base-debian12 (57MB, more secure - no shell)
+FROM alpine/curl:latest
 
-WORKDIR /
-
+# Copy prebuilt Linux binary (CGO_ENABLED=0, GOOS=linux)
 COPY build/fluidity-agent /fluidity-agent
 
+# Expose agent proxy port
 EXPOSE 8080
 
+# Default entrypoint; pass flags via `docker run` command arguments
 ENTRYPOINT ["/fluidity-agent"]

@@ -1,0 +1,4 @@
+FROM alpine:latest
+COPY build/fluidity-server /fluidity-server
+EXPOSE 8443
+ENTRYPOINT ["/fluidity-server"]

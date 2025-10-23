@@ -1,0 +1,4 @@
+FROM alpine:latest
+COPY build/fluidity-agent /fluidity-agent
+EXPOSE 8080
+ENTRYPOINT ["/fluidity-agent"]

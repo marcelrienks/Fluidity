@@ -1,8 +1,7 @@
 # Server Dockerfile for local builds
 # Uses pre-built binary from build/ directory
-# Using distroless/base-debian12 - includes ca-certificates + libc for DNS (34.3MB)
-# Note: "base" (not "static") required for DNS resolution in Go's net/http
-FROM gcr.io/distroless/base-debian12:latest
+# alpine/curl - optimal working image with ca-certificates (20.5MB base)
+FROM alpine/curl:latest
 
 # Create app directory
 WORKDIR /root/

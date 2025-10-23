@@ -149,17 +149,23 @@ Fluidity provides OS-specific Makefiles for building and running the project. Al
 - Uses multi-stage Dockerfile with `golang:1.21-alpine` builder and `alpine:latest` runtime
 - Includes system CA certificates for outbound HTTPS
 - Suitable for production deployment
-- Image size: ~57MB (34MB base + 23MB binary)
+- Image size: ~43MB (21MB base + 22MB binary)
 
 **Docker Images - Production Recommended** (`docker-build-*-scratch`):
-- Uses distroless/base-debian12 from Google Container Registry
-- Includes ca-certificates and libc (glibc) for DNS resolution
-- No shell, no package manager - minimal attack surface
+- Uses **alpine/curl:latest** - optimal balance of size and functionality
+- Includes ca-certificates-bundle and musl libc for DNS resolution and HTTPS
 - Cross-compiles static Linux binary (`GOOS=linux GOARCH=amd64 CGO_ENABLED=0`)
-- Image size: ~57MB
-- **Recommended for production** - secure and fully functional
+- Image size: **~43MB** (20.5MB base + 22-23MB binary)
+- **Recommended for production** - proven working, debuggable, 24% smaller than distroless
+- Alternative: Use `gcr.io/distroless/base-debian12` for maximum security (no shell/debugging) at ~57MB
 
-**Note**: Previous scratch-based images (~14MB) could not perform DNS resolution or outbound HTTPS requests. The distroless/base images add minimal overhead but ensure full functionality.
+**Base Image Comparison**:
+| Image | Size | Has Shell | Debugging | Security | Recommendation |
+|-------|------|-----------|-----------|----------|----------------|
+| alpine/curl | 43MB | ✅ Yes | ✅ Easy | Standard | ✅ **Recommended** |
+| distroless/base-debian12 | 57MB | ❌ No | ❌ Limited | ✅ Hardened | High security needs |
+
+**Note**: Base alpine:latest (~13MB) and scratch images cannot perform outbound HTTPS due to ca-certificates configuration issues. Alpine/curl provides pre-configured certificates at minimal overhead.
 
 ### Quick Command Reference
 
