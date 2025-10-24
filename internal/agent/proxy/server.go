@@ -112,6 +112,13 @@ func (p *Server) handleHTTPRequest(w http.ResponseWriter, r *http.Request) {
 	// Generate request ID
 	reqID := p.generateRequestID()
 
+	// Check if tunnel is connected
+	if !p.tunnelConn.IsConnected() {
+		p.logger.Error("Tunnel not connected", nil, "id", reqID)
+		http.Error(w, "Tunnel connection unavailable. Please ensure the tunnel server is running and try again.", http.StatusServiceUnavailable)
+		return
+	}
+
 	// Ensure URL is absolute
 	if !r.URL.IsAbs() {
 		scheme := "http"
@@ -122,8 +129,9 @@ func (p *Server) handleHTTPRequest(w http.ResponseWriter, r *http.Request) {
 		r.URL.Host = r.Host
 	}
 
-	// Read request body
-	body, err := io.ReadAll(r.Body)
+	// Read request body with size limit
+	const maxBodySize = 10 * 1024 * 1024 // 10MB limit
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodySize))
 	if err != nil {
 		p.logger.Error("Failed to read request body", err, "id", reqID)
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
@@ -143,8 +151,21 @@ func (p *Server) handleHTTPRequest(w http.ResponseWriter, r *http.Request) {
 	// Send through tunnel and get response
 	resp, err := p.tunnelConn.SendRequest(tunnelReq)
 	if err != nil {
-		p.logger.Error("Failed to send request through tunnel", err, "id", reqID)
-		http.Error(w, "Tunnel error", http.StatusBadGateway)
+		p.logger.Error("Failed to send request through tunnel", err, "id", reqID, "url", r.URL.String())
+
+		// Provide more specific error message
+		errorMsg := "Tunnel error: Unable to forward request"
+		statusCode := http.StatusBadGateway
+
+		if strings.Contains(err.Error(), "not connected") {
+			errorMsg = "Tunnel connection lost. Attempting to reconnect..."
+			statusCode = http.StatusServiceUnavailable
+		} else if strings.Contains(err.Error(), "timeout") {
+			errorMsg = "Request timeout: The server took too long to respond"
+			statusCode = http.StatusGatewayTimeout
+		}
+
+		http.Error(w, errorMsg, statusCode)
 		return
 	}
 
@@ -159,6 +180,13 @@ func (p *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 
 	p.logger.Debug("CONNECT starting", "id", reqID, "host", r.Host)
 
+	// Check if tunnel is connected
+	if !p.tunnelConn.IsConnected() {
+		p.logger.Error("Tunnel not connected for CONNECT", nil, "id", reqID, "host", r.Host)
+		http.Error(w, "Tunnel connection unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
 	// Ask tunnel to open remote connection
 	ack, err := p.tunnelConn.ConnectOpen(reqID, r.Host)
 	if err != nil || !ack.Ok {
@@ -166,7 +194,16 @@ func (p *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 			err = fmt.Errorf(ack.Error)
 		}
 		p.logger.Error("CONNECT open failed", err, "host", r.Host, "id", reqID)
-		http.Error(w, "Tunnel CONNECT failed", http.StatusBadGateway)
+
+		// Provide more specific error message
+		errorMsg := "Tunnel CONNECT failed"
+		if strings.Contains(err.Error(), "timeout") {
+			errorMsg = "Connection timeout"
+		} else if strings.Contains(err.Error(), "refused") {
+			errorMsg = "Connection refused by target"
+		}
+
+		http.Error(w, errorMsg, http.StatusBadGateway)
 		return
 	}
 
@@ -175,20 +212,34 @@ func (p *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	// Hijack client connection to get raw TCP
 	hj, ok := w.(http.Hijacker)
 	if !ok {
+		p.logger.Error("Proxy does not support hijacking", nil, "id", reqID)
 		http.Error(w, "Proxy does not support hijacking", http.StatusInternalServerError)
 		return
 	}
 	clientConn, clientBuf, err := hj.Hijack()
 	if err != nil {
 		p.logger.Error("Hijack failed", err, "id", reqID)
+		_ = p.tunnelConn.ConnectClose(reqID, "hijack failed")
 		return
 	}
 
 	p.logger.Debug("CONNECT hijacked connection", "id", reqID)
 
 	// Send 200 Connection established
-	_, _ = clientBuf.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n")
-	_ = clientBuf.Flush()
+	_, writeErr := clientBuf.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n")
+	if writeErr != nil {
+		p.logger.Error("Failed to send 200 response", writeErr, "id", reqID)
+		_ = p.tunnelConn.ConnectClose(reqID, "failed to send 200")
+		clientConn.Close()
+		return
+	}
+
+	if flushErr := clientBuf.Flush(); flushErr != nil {
+		p.logger.Error("Failed to flush 200 response", flushErr, "id", reqID)
+		_ = p.tunnelConn.ConnectClose(reqID, "failed to flush 200")
+		clientConn.Close()
+		return
+	}
 
 	p.logger.Debug("CONNECT sent 200 to client", "id", reqID)
 

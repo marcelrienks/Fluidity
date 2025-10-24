@@ -142,31 +142,37 @@ func (c *Client) SendRequest(req *protocol.Request) (*protocol.Response, error) 
 	c.requests[req.ID] = respChan
 	c.mu.Unlock()
 
+	// Cleanup function
+	cleanup := func() {
+		c.mu.Lock()
+		delete(c.requests, req.ID)
+		c.mu.Unlock()
+	}
+
 	// Send request wrapped in Envelope
 	encoder := json.NewEncoder(conn)
 	env := protocol.Envelope{Type: "http_request", Payload: req}
 	if err := encoder.Encode(env); err != nil {
-		c.mu.Lock()
-		delete(c.requests, req.ID)
-		c.mu.Unlock()
+		cleanup()
+		c.logger.Error("Failed to send request", err, "id", req.ID)
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
 
 	c.logger.Debug("Sent request through tunnel", "id", req.ID, "url", req.URL)
 
-	// Wait for response
+	// Wait for response with timeout
 	select {
-	case resp := <-respChan:
+	case resp, ok := <-respChan:
+		if !ok {
+			return nil, fmt.Errorf("response channel closed")
+		}
 		return resp, nil
 	case <-time.After(30 * time.Second):
-		c.mu.Lock()
-		delete(c.requests, req.ID)
-		c.mu.Unlock()
-		return nil, fmt.Errorf("request timeout")
+		cleanup()
+		c.logger.Warn("Request timeout", "id", req.ID, "url", req.URL)
+		return nil, fmt.Errorf("request timeout after 30 seconds")
 	case <-c.ctx.Done():
-		c.mu.Lock()
-		delete(c.requests, req.ID)
-		c.mu.Unlock()
+		cleanup()
 		return nil, fmt.Errorf("connection closed")
 	}
 }

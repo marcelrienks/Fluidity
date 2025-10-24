@@ -130,7 +130,7 @@ try {
 
     # Step 6: Wait for initialization
     Write-Host "`n[Step 6] Waiting for initialization..." -ForegroundColor Yellow
-    Start-Sleep -Seconds 3
+    Start-Sleep -Seconds 5
     
     # Check processes are still running
     if ($serverProcess.HasExited) {

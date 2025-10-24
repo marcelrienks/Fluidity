@@ -78,8 +78,6 @@ A dual-component system consisting of:
 - [x] **FR-019**: Implement recommended security measures for public server deployment (Oct 2025)
 - [x] **FR-020**: Minimal logging for debugging purposes only (startup, connections, endpoint routing) (Oct 2025)
 - [x] **FR-021**: Support all protocols required for general web browsing (Oct 2025 - HTTP/HTTPS/WebSocket)
-- [ ] **FR-023**: Test and analyze detection by endpoint security tools (CrowdStrike, Carbon Black, etc.) (planned)
-- [ ] **FR-024**: Implement mitigations to avoid triggering EDR/security monitoring alerts (planned)
 
 ### 4.4 Testing Requirements
 - [x] **FR-025**: Develop integration tests for HTTP tunneling functionality (Oct 2025 - test-docker.ps1/.sh)
@@ -177,8 +175,6 @@ A dual-component system consisting of:
 - [ ] Improved error handling and recovery
 
 ### 7.4 Phase 4: Security Hardening 🚧 NOT STARTED
-- [ ] Test and evaluate detection by security tools (CrowdStrike, Carbon Black, etc.)
-- [ ] Implement mitigations to prevent triggering EDR/security monitoring tools
 - [ ] Security audit and vulnerability assessment
 - [ ] Penetration testing
 - [ ] Document security best practices
