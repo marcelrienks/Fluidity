@@ -454,6 +454,34 @@ To revert: set "No proxy" or "Use system proxy settings".
 
 For advanced configuration, see the `configs/agent.local.yaml` and `configs/server.local.yaml` files.
 
+## Testing
+
+Fluidity has comprehensive testing at multiple levels: unit tests, integration tests, and end-to-end tests.
+
+**📖 For complete testing documentation, see [docs/testing.md](docs/testing.md)**
+
+### Quick Test Commands
+
+```powershell
+# Run all unit tests (< 1 second)
+go test ./internal/shared/... -v
+
+# Run all integration tests (~3-10 seconds)
+go test ./internal/integration/... -v -timeout 5m
+
+# Run end-to-end tests
+.\scripts\test-local.ps1    # Local binaries
+.\scripts\test-docker.ps1   # Docker containers
+```
+
+### Test Coverage
+
+- **Unit Tests**: 17 tests, 100% coverage (circuit breaker, retry logic)
+- **Integration Tests**: 30+ tests (tunnel, proxy, WebSocket, circuit breaker)
+- **E2E Tests**: 6 scenarios (HTTP, HTTPS, WebSocket in local & Docker environments)
+
+Total: **53+ tests** covering all aspects of the system.
+
 ## Automated End-to-End Testing
 
 Automated test scripts are available to quickly validate both Docker containers and local binaries.

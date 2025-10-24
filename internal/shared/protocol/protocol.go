@@ -1,6 +1,10 @@
 package protocol
 
-import "time"
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"time"
+)
 
 // Request represents an HTTP request through the tunnel
 type Request struct {
@@ -36,7 +40,8 @@ type HealthCheck struct {
 
 // Envelope wraps different message kinds for the tunnel
 // Types: "http_request", "http_response", "connect_open", "connect_ack", "connect_data", "connect_close",
-//        "ws_open", "ws_ack", "ws_message", "ws_close"
+//
+//	"ws_open", "ws_ack", "ws_message", "ws_close"
 type Envelope struct {
 	Type    string `json:"type"`
 	Payload any    `json:"payload"`
@@ -93,4 +98,11 @@ type WebSocketClose struct {
 	ID    string `json:"id"`
 	Code  int    `json:"code,omitempty"`
 	Error string `json:"error,omitempty"`
+}
+
+// GenerateID generates a unique ID for requests and connections
+func GenerateID() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }
