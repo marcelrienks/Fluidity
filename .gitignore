@@ -17,3 +17,9 @@ certs/
 
 # Build outputs
 build/
+
+# Logs
+logs/
+*.log
+*.out
+*.err
