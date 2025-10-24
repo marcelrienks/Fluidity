@@ -13,8 +13,10 @@ import (
 	"sync"
 	"time"
 
+	"fluidity/internal/shared/circuitbreaker"
 	"fluidity/internal/shared/logging"
 	"fluidity/internal/shared/protocol"
+	"fluidity/internal/shared/retry"
 	tlsutil "fluidity/internal/shared/tls"
 
 	"github.com/gorilla/websocket"
@@ -22,19 +24,21 @@ import (
 
 // Server handles mTLS connections from agents
 type Server struct {
-	listener    net.Listener
-	httpClient  *http.Client
-	logger      *logging.Logger
-	ctx         context.Context
-	cancel      context.CancelFunc
-	wg          sync.WaitGroup
-	maxConns    int
-	activeConns int32
-	connMutex   sync.RWMutex
-	tcpConns    map[string]net.Conn
-	tcpMutex    sync.RWMutex
-	wsConns     map[string]*websocket.Conn
-	wsMutex     sync.RWMutex
+	listener       net.Listener
+	httpClient     *http.Client
+	circuitBreaker *circuitbreaker.CircuitBreaker
+	retryConfig    retry.Config
+	logger         *logging.Logger
+	ctx            context.Context
+	cancel         context.CancelFunc
+	wg             sync.WaitGroup
+	maxConns       int
+	activeConns    int32
+	connMutex      sync.RWMutex
+	tcpConns       map[string]net.Conn
+	tcpMutex       sync.RWMutex
+	wsConns        map[string]*websocket.Conn
+	wsMutex        sync.RWMutex
 }
 
 // NewServer creates a new tunnel server
@@ -60,15 +64,29 @@ func NewServer(tlsConfig *tls.Config, addr string, maxConns int, logLevel string
 	logger := logging.NewLogger("tunnel-server")
 	logger.SetLevel(logLevel)
 
+	// Initialize circuit breaker for external requests
+	cbConfig := circuitbreaker.DefaultConfig()
+	cb := circuitbreaker.New(cbConfig)
+
+	// Initialize retry configuration
+	retryConfig := retry.Config{
+		MaxAttempts:  3,
+		InitialDelay: 500 * time.Millisecond,
+		MaxDelay:     5 * time.Second,
+		Multiplier:   2.0,
+	}
+
 	return &Server{
-		listener:   listener,
-		httpClient: httpClient,
-		logger:     logger,
-		ctx:        ctx,
-		cancel:     cancel,
-		maxConns:   maxConns,
-		tcpConns:   make(map[string]net.Conn),
-		wsConns:    make(map[string]*websocket.Conn),
+		listener:       listener,
+		httpClient:     httpClient,
+		circuitBreaker: cb,
+		retryConfig:    retryConfig,
+		logger:         logger,
+		ctx:            ctx,
+		cancel:         cancel,
+		maxConns:       maxConns,
+		tcpConns:       make(map[string]net.Conn),
+		wsConns:        make(map[string]*websocket.Conn),
 	}, nil
 }
 
@@ -266,40 +284,84 @@ func (s *Server) handleConnection(conn *tls.Conn) {
 	s.logger.Info("Client disconnected", "client", clientCert.Subject.CommonName)
 }
 
-// processRequest handles a single HTTP request
+// processRequest handles a single HTTP request with circuit breaker and retry logic
 func (s *Server) processRequest(req *protocol.Request, encoder *json.Encoder, mu *sync.Mutex) {
 	s.logger.Debug("Processing request", "id", req.ID, "method", req.Method, "url", req.URL)
-
-	// Create HTTP request
-	httpReq, err := http.NewRequestWithContext(s.ctx, req.Method, req.URL, bytes.NewReader(req.Body))
-	if err != nil {
-		s.sendErrorResponse(req.ID, err, encoder, mu)
-		return
-	}
-
-	// Set headers
-	for name, values := range req.Headers {
-		for _, value := range values {
-			httpReq.Header.Add(name, value)
-		}
-	}
 
 	// Log the target endpoint (domain only)
 	s.logRequest(req)
 
-	// Make request
-	httpResp, err := s.httpClient.Do(httpReq)
+	// Execute request with circuit breaker and retry logic
+	err := s.circuitBreaker.Execute(func() error {
+		return s.executeRequestWithRetry(req, encoder, mu)
+	})
+
+	if err != nil {
+		// Check if circuit is open
+		if err == circuitbreaker.ErrCircuitOpen {
+			s.logger.Warn("Circuit breaker is open, rejecting request", "id", req.ID)
+			s.sendErrorResponse(req.ID, fmt.Errorf("service temporarily unavailable (circuit open)"), encoder, mu)
+		}
+		// Other errors already handled by executeRequestWithRetry
+	}
+}
+
+// executeRequestWithRetry executes a single HTTP request with retry logic
+func (s *Server) executeRequestWithRetry(req *protocol.Request, encoder *json.Encoder, mu *sync.Mutex) error {
+	// Define shouldRetry function for network errors
+	shouldRetry := func(err error) bool {
+		// Retry on network errors or temporary failures
+		if urlErr, ok := err.(*url.Error); ok {
+			// Retry on timeout or temporary errors
+			if urlErr.Timeout() || urlErr.Temporary() {
+				return true
+			}
+		}
+		// Don't retry on other errors
+		return false
+	}
+
+	var httpResp *http.Response
+	var body []byte
+
+	// Execute with retry
+	err := retry.Execute(s.ctx, s.retryConfig, shouldRetry, func() error {
+		// Create HTTP request
+		httpReq, err := http.NewRequestWithContext(s.ctx, req.Method, req.URL, bytes.NewReader(req.Body))
+		if err != nil {
+			return err
+		}
+
+		// Set headers
+		for name, values := range req.Headers {
+			for _, value := range values {
+				httpReq.Header.Add(name, value)
+			}
+		}
+
+		// Make request
+		resp, err := s.httpClient.Do(httpReq)
+		if err != nil {
+			s.logger.Debug("Request failed, will retry if applicable", "id", req.ID, "error", err)
+			return err
+		}
+
+		httpResp = resp
+		return nil
+	})
+
 	if err != nil {
 		s.sendErrorResponse(req.ID, err, encoder, mu)
-		return
+		return err
 	}
+
 	defer httpResp.Body.Close()
 
 	// Read response body
-	body, err := io.ReadAll(httpResp.Body)
+	body, err = io.ReadAll(httpResp.Body)
 	if err != nil {
 		s.sendErrorResponse(req.ID, err, encoder, mu)
-		return
+		return err
 	}
 
 	// Send response back through tunnel wrapped in Envelope
@@ -316,9 +378,11 @@ func (s *Server) processRequest(req *protocol.Request, encoder *json.Encoder, mu
 	mu.Unlock()
 	if encodeErr != nil {
 		s.logger.Error("Failed to send response", encodeErr, "id", req.ID)
+		return encodeErr
 	}
 
 	s.logger.Debug("Response sent", "id", req.ID, "status", httpResp.StatusCode, "size", len(body))
+	return nil
 }
 
 // sendErrorResponse sends an error response back to the client
@@ -376,12 +440,21 @@ func parseURL(rawURL string) (*url.URL, error) {
 func (s *Server) handleConnectOpen(open *protocol.ConnectOpen, encoder *json.Encoder, mu *sync.Mutex) {
 	s.logger.Info("CONNECT open request", "id", open.ID, "address", open.Address)
 
-	// Dial target
-	targetConn, err := net.DialTimeout("tcp", open.Address, 10*time.Second)
+	// Create context with timeout for dial
+	dialCtx, dialCancel := context.WithTimeout(s.ctx, 10*time.Second)
+	defer dialCancel()
+
+	// Dial target with context
+	var dialer net.Dialer
+	targetConn, err := dialer.DialContext(dialCtx, "tcp", open.Address)
 	if err != nil {
 		s.logger.Error("CONNECT dial failed", err, "id", open.ID, "address", open.Address)
 		// Send error via connect_close
-		env := protocol.Envelope{Type: "connect_close", Payload: &protocol.ConnectClose{ID: open.ID, Error: err.Error()}}
+		errMsg := err.Error()
+		if dialCtx.Err() == context.DeadlineExceeded {
+			errMsg = "connection timeout"
+		}
+		env := protocol.Envelope{Type: "connect_close", Payload: &protocol.ConnectClose{ID: open.ID, Error: errMsg}}
 		mu.Lock()
 		_ = encoder.Encode(env)
 		mu.Unlock()
@@ -423,10 +496,25 @@ func (s *Server) handleConnectOpen(open *protocol.ConnectOpen, encoder *json.Enc
 
 		s.logger.Debug("CONNECT reader goroutine started", "id", open.ID)
 		buf := make([]byte, 32*1024)
+
+		// Set read deadline to detect stale connections
+		targetConn.SetReadDeadline(time.Now().Add(5 * time.Minute))
+
 		for {
+			select {
+			case <-s.ctx.Done():
+				s.logger.Debug("CONNECT reader context cancelled", "id", open.ID)
+				return
+			default:
+			}
+
 			n, err := targetConn.Read(buf)
 			if n > 0 {
 				s.logger.Debug("CONNECT read data from target", "id", open.ID, "bytes", n)
+
+				// Reset read deadline on successful read
+				targetConn.SetReadDeadline(time.Now().Add(5 * time.Minute))
+
 				dataEnv := protocol.Envelope{Type: "connect_data", Payload: &protocol.ConnectData{ID: open.ID, Chunk: buf[:n]}}
 				mu.Lock()
 				encErr := encoder.Encode(dataEnv)
@@ -439,7 +527,12 @@ func (s *Server) handleConnectOpen(open *protocol.ConnectOpen, encoder *json.Enc
 			}
 			if err != nil {
 				if err != io.EOF {
-					s.logger.Debug("CONNECT read error from target", "id", open.ID, "error", err)
+					// Check if it's a timeout error
+					if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+						s.logger.Debug("CONNECT read timeout, connection idle", "id", open.ID)
+					} else {
+						s.logger.Debug("CONNECT read error from target", "id", open.ID, "error", err)
+					}
 				}
 				return
 			}
