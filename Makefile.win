@@ -12,7 +12,7 @@ BUILD_DIR=build
 AGENT_DIR=cmd/agent
 SERVER_DIR=cmd/server
 
-.PHONY: all build clean test deps run-agent-local run-server-local docker-build-agent docker-build-server build-linux-agent build-linux-server docker-build-agent-scratch docker-build-server-scratch
+.PHONY: all build clean test deps run-agent-local run-server-local docker-build-agent docker-build-server build-linux-agent build-linux-server
 
 all: clean deps build
 
@@ -28,7 +28,7 @@ build-server:
 	@if not exist $(BUILD_DIR) mkdir $(BUILD_DIR)
 	$(GOBUILD) -o $(BUILD_DIR)\$(SERVER_BINARY) ./$(SERVER_DIR)
 
-# Cross-compile static Linux binaries (useful for scratch-based images)
+# Cross-compile static Linux binaries (for Docker multi-stage builds)
 build-linux-agent:
 	@echo Building agent for linux/amd64 (static)...
 	set GOOS=linux&& set GOARCH=amd64&& set CGO_ENABLED=0&& $(GOBUILD) -o $(BUILD_DIR)\fluidity-agent ./$(AGENT_DIR)
@@ -66,16 +66,8 @@ fmt:
 
 docker-build-agent:
 	@echo Building agent Docker image...
-	@cmd /V:ON /C "(docker build -t fluidity-agent -f deployments/agent/Dockerfile .) || (echo Fallback to scratch image build... && $(MAKE) -f Makefile.win build-linux-agent && docker build -t fluidity-agent -f deployments/agent/Dockerfile.scratch .)"
-
-docker-build-agent-scratch: build-linux-agent
-	@echo Building agent Docker image (scratch)...
-	docker build -t fluidity-agent -f deployments/agent/Dockerfile.scratch .
+	docker build -t fluidity-agent -f deployments/agent/Dockerfile .
 
 docker-build-server:
 	@echo Building server Docker image...
-	@cmd /V:ON /C "(docker build -t fluidity-server -f deployments/server/Dockerfile .) || (echo Fallback to scratch image build... && $(MAKE) -f Makefile.win build-linux-server && docker build -t fluidity-server -f deployments/server/Dockerfile.scratch .)"
-
-docker-build-server-scratch: build-linux-server
-	@echo Building server Docker image (scratch)...
-	docker build -t fluidity-server -f deployments/server/Dockerfile.scratch .
+	docker build -t fluidity-server -f deployments/server/Dockerfile .

@@ -19,11 +19,8 @@ COPY . .
 # Build the server
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o fluidity-server ./cmd/server
 
-# Final stage
-FROM alpine:latest
-
-# Install ca-certificates for HTTPS requests
-RUN apk --no-cache add ca-certificates
+# Final stage - use alpine/curl for ca-certificates and debugging tools
+FROM alpine/curl:latest
 
 # Create app directory
 WORKDIR /root/
