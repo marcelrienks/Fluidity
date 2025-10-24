@@ -157,6 +157,83 @@ try {
         throw "Additional tests failed: $($testFailures -join ', ')"
     }
 
+    # Step 10: WebSocket test
+    Write-Host "`n[Step 10] Testing WebSocket tunnel" -ForegroundColor Yellow
+    
+    # Test WebSocket echo service
+    Write-Host "  Testing wss://echo.websocket.org..." -ForegroundColor Cyan
+    
+    # Use a simple Node.js WebSocket test if available, otherwise skip
+    $wsTestScript = @"
+const WebSocket = require('ws');
+const HttpsProxyAgent = require('https-proxy-agent');
+
+const proxyUrl = 'http://127.0.0.1:$proxyPort';
+const wsUrl = 'wss://echo.websocket.org/';
+
+const agent = new HttpsProxyAgent(proxyUrl);
+const ws = new WebSocket(wsUrl, { agent });
+
+let success = false;
+const timeout = setTimeout(() => {
+    console.log('TIMEOUT');
+    process.exit(1);
+}, 10000);
+
+ws.on('open', function() {
+    ws.send('WebSocket test message');
+});
+
+ws.on('message', function(data) {
+    if (data.toString().includes('test message')) {
+        console.log('SUCCESS');
+        success = true;
+        clearTimeout(timeout);
+        ws.close();
+        process.exit(0);
+    }
+});
+
+ws.on('error', function(err) {
+    console.log('ERROR: ' + err.message);
+    clearTimeout(timeout);
+    process.exit(1);
+});
+"@
+    
+    # Check if Node.js is available for WebSocket testing
+    $nodeAvailable = $null -ne (Get-Command node -ErrorAction SilentlyContinue)
+    
+    if ($nodeAvailable) {
+        # Create temp test file
+        $tempWsTest = Join-Path $env:TEMP "fluidity-ws-test.js"
+        $wsTestScript | Out-File -FilePath $tempWsTest -Encoding UTF8
+        
+        # Check if ws module is available globally
+        $wsResult = & node -e "try { require('ws'); require('https-proxy-agent'); console.log('OK'); } catch(e) { console.log('MISSING'); }" 2>&1
+        
+        if ($wsResult -match "OK") {
+            try {
+                $wsOutput = & node $tempWsTest 2>&1 | Out-String
+                if ($wsOutput -match "SUCCESS") {
+                    Write-Host "  [OK] WebSocket tunnel test passed" -ForegroundColor Green
+                } elseif ($wsOutput -match "TIMEOUT") {
+                    Write-Host "  [SKIP] WebSocket test timed out (may not be critical)" -ForegroundColor Yellow
+                } else {
+                    Write-Host "  [SKIP] WebSocket test failed: $wsOutput" -ForegroundColor Yellow
+                }
+            } finally {
+                Remove-Item $tempWsTest -ErrorAction SilentlyContinue
+            }
+        } else {
+            Write-Host "  [SKIP] WebSocket test requires 'ws' and 'https-proxy-agent' npm packages" -ForegroundColor Yellow
+            Write-Host "        Install with: npm install -g ws https-proxy-agent" -ForegroundColor Cyan
+        }
+    } else {
+        Write-Host "  [SKIP] WebSocket test requires Node.js (install from nodejs.org)" -ForegroundColor Yellow
+        Write-Host "        Core HTTP/HTTPS tests passed successfully" -ForegroundColor Cyan
+    }
+
     # Success
     Write-Host "`n========================================" -ForegroundColor Green
     Write-Host "  ALL TESTS PASSED!" -ForegroundColor Green

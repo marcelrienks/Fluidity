@@ -169,7 +169,7 @@ func (s *Server) handleConnection(conn *tls.Conn) {
 
 	decoder := json.NewDecoder(conn)
 	encoder := json.NewEncoder(conn)
-	
+
 	// Mutex to protect concurrent writes to encoder
 	var encoderMutex sync.Mutex
 
