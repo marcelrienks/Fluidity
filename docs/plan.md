@@ -1,7 +1,7 @@
 # Fluidity Implementation Plan
 **Project Roadmap & Outstanding Tasks**
 
-**Status as of:** October 23, 2025  
+**Status as of:** October 24, 2025
 **Current Phase:** Phase 1 Complete ✅ | Phase 1.5 In Progress 🔄
 
 ---
@@ -587,11 +587,10 @@ All Phase 1 requirements have been successfully implemented:
 ## 📝 Notes
 
 ### Known Issues to Address
-1. Documentation states "HTTPS not implemented" but code has full CONNECT support
-2. No test coverage currently exists
-3. No EDR/security tool testing has been performed
-4. No cloud deployment has been attempted
-5. Certificate rotation is manual only
+1. No automated test coverage currently exists
+2. No EDR/security tool testing has been performed
+3. No cloud deployment has been attempted
+4. Certificate rotation is manual only
 
 ### Technical Debt
 1. No automated testing infrastructure
@@ -623,5 +622,5 @@ All Phase 1 requirements have been successfully implemented:
 
 ---
 
-**Last Updated:** October 23, 2025  
+**Last Updated:** October 24, 2025
 **Next Review:** Upon Phase 1.5 completion
