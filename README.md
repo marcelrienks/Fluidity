@@ -145,27 +145,12 @@ Fluidity provides OS-specific Makefiles for building and running the project. Al
   # Creates: build/fluidity-agent.exe and build/fluidity-server.exe
   ```
 
-**Docker Images - Standard** (`docker-build-*`):
-- Uses multi-stage Dockerfile with `golang:1.21-alpine` builder and `alpine:latest` runtime
-- Includes system CA certificates for outbound HTTPS
-- Suitable for production deployment
-- Image size: ~43MB (21MB base + 22MB binary)
-
-**Docker Images - Production Recommended** (`docker-build-*-scratch`):
-- Uses **alpine/curl:latest** - optimal balance of size and functionality
-- Includes ca-certificates-bundle and musl libc for DNS resolution and HTTPS
-- Cross-compiles static Linux binary (`GOOS=linux GOARCH=amd64 CGO_ENABLED=0`)
-- Image size: **~43MB** (20.5MB base + 22-23MB binary)
-- **Recommended for production** - proven working, debuggable, 24% smaller than distroless
-- Alternative: Use `gcr.io/distroless/base-debian12` for maximum security (no shell/debugging) at ~57MB
-
-**Base Image Comparison**:
-| Image | Size | Has Shell | Debugging | Security | Recommendation |
-|-------|------|-----------|-----------|----------|----------------|
-| alpine/curl | 43MB | ✅ Yes | ✅ Easy | Standard | ✅ **Recommended** |
-| distroless/base-debian12 | 57MB | ❌ No | ❌ Limited | ✅ Hardened | High security needs |
-
-**Note**: Base alpine:latest (~13MB) and scratch images cannot perform outbound HTTPS due to ca-certificates configuration issues. Alpine/curl provides pre-configured certificates at minimal overhead.
+**Docker Images** (`docker-build-*`):
+- Uses multi-stage Dockerfile with `golang:1.21-alpine` builder
+- Runtime base: **alpine/curl:latest** - includes CA certificates and debugging tools
+- Supports outbound HTTPS requests (required for tunnel functionality)
+- Image size: ~43MB (20.5MB base + 22-23MB binary)
+- Includes shell for debugging and troubleshooting
 
 ### Quick Command Reference
 
@@ -176,13 +161,9 @@ make -f Makefile.win build
 make -f Makefile.win run-server-local  # Terminal 1
 make -f Makefile.win run-agent-local   # Terminal 2
 
-# Docker images (standard)
+# Docker images
 make -f Makefile.win docker-build-server
 make -f Makefile.win docker-build-agent
-
-# Docker images (scratch - for restricted networks)
-make -f Makefile.win docker-build-server-scratch
-make -f Makefile.win docker-build-agent-scratch
 ```
 
 **macOS:**
@@ -192,7 +173,7 @@ make -f Makefile.macos build
 make -f Makefile.macos run-server-local  # Terminal 1
 make -f Makefile.macos run-agent-local   # Terminal 2
 
-# Docker images (standard)
+# Docker images
 make -f Makefile.macos docker-build-server
 make -f Makefile.macos docker-build-agent
 ```
@@ -204,14 +185,13 @@ make -f Makefile.linux build
 make -f Makefile.linux run-server-local  # Terminal 1
 make -f Makefile.linux run-agent-local   # Terminal 2
 
-# Docker images (standard - auto-fallback to scratch if pulls fail)
+# Docker images
 make -f Makefile.linux docker-build-server
 make -f Makefile.linux docker-build-agent
 ```
 
-> **Note:** The default `Makefile` is for reference only. Always use the OS-specific Makefile for your environment.
 
-## Current Progress (Oct 23, 2025)
+## Current Progress (Oct 24, 2025)
 
 Validated end-to-end HTTP and HTTPS tunneling via Docker containers with dev mTLS certs:
 
@@ -287,7 +267,6 @@ Build Docker images and run them as containers:
 
 **Step 1: Build Images**
 
-Standard images (includes CA certificates, ~20-30MB):
 ```powershell
 # Windows
 make -f Makefile.win docker-build-server
@@ -297,16 +276,9 @@ make -f Makefile.win docker-build-agent
 make -f Makefile.macos docker-build-server
 make -f Makefile.macos docker-build-agent
 
-# Linux (auto-fallback to scratch if pulls fail)
+# Linux
 make -f Makefile.linux docker-build-server
 make -f Makefile.linux docker-build-agent
-```
-
-Scratch images (minimal, no CA certs, ~14MB - use if Docker Hub pulls are blocked):
-```powershell
-# Windows
-make -f Makefile.win docker-build-server-scratch
-make -f Makefile.win docker-build-agent-scratch
 ```
 
 **Step 2: Run Containers**
@@ -314,7 +286,7 @@ make -f Makefile.win docker-build-agent-scratch
 Windows (PowerShell):
 
 ```powershell
-# Server (standard image)
+# Server
 docker run --rm `
   -v ${PWD}\certs:/root/certs:ro `
   -v ${PWD}\configs\server.local.yaml:/root/config/server.yaml:ro `
@@ -322,57 +294,19 @@ docker run --rm `
   fluidity-server `
   ./fluidity-server --config ./config/server.yaml
 
-# Agent (standard image)
+# Agent
 docker run --rm `
   -v ${PWD}\certs:/root/certs:ro `
   -v ${PWD}\configs\agent.local.yaml:/root/config/agent.yaml:ro `
   -p 8080:8080 `
   fluidity-agent `
   ./fluidity-agent --config ./config/agent.yaml
-
-# If you built scratch images, omit the binary path and pass only flags:
-docker run --rm `
-  -v ${PWD}\certs:/root/certs:ro `
-  -v ${PWD}\configs\server.local.yaml:/root/config/server.yaml:ro `
-  -p 8443:8443 `
-  fluidity-server `
-  --config /root/config/server.yaml
-
-# Scratch images (recommended when base image pulls are blocked):
-# 1) Create a user-defined network so the agent can resolve the server by name
-docker network create fluidity-net
-
-# 2) Run the server (scratch image) with certs mounted and flags
-docker run --rm -d --name fluidity-server --network fluidity-net `
-  -p 8443:8443 `
-  -v ${PWD}\certs:/certs:ro `
-  fluidity-server `
-  --listen-addr 0.0.0.0 `
-  --listen-port 8443 `
-  --cert /certs/server.crt `
-  --key /certs/server.key `
-  --ca /certs/ca.crt `
-  --log-level debug `
-  --max-connections 100
-
-# 3) Run the agent (scratch image) with certs mounted and flags
-docker run --rm -d --name fluidity-agent --network fluidity-net `
-  -p 8080:8080 `
-  -v ${PWD}\certs:/certs:ro `
-  fluidity-agent `
-  --server-ip fluidity-server `
-  --server-port 8443 `
-  --cert /certs/client.crt `
-  --key /certs/client.key `
-  --ca /certs/ca.crt `
-  --proxy-port 8080 `
-  --log-level debug
 ```
 
 macOS/Linux (bash):
 
 ```bash
-# Server (standard image)
+# Server
 docker run --rm \
   -v "$(pwd)/certs:/root/certs:ro" \
   -v "$(pwd)/configs/server.local.yaml:/root/config/server.yaml:ro" \
@@ -380,28 +314,14 @@ docker run --rm \
   fluidity-server \
   ./fluidity-server --config ./config/server.yaml
 
-# Agent (standard image)
+# Agent
 docker run --rm \
   -v "$(pwd)/certs:/root/certs:ro" \
   -v "$(pwd)/configs/agent.local.yaml:/root/config/agent.yaml:ro" \
   -p 8080:8080 \
   fluidity-agent \
   ./fluidity-agent --config ./config/agent.yaml
-
-# For scratch images, pass flags only
-docker run --rm \
-  -v "$(pwd)/certs:/root/certs:ro" \
-  -v "$(pwd)/configs/server.local.yaml:/root/config/server.yaml:ro" \
-  -p 8443:8443 \
-  fluidity-server \
-  --config /root/config/server.yaml
 ```
-
-Tip:
-- Scratch images don't include system CA certificates. If the server or agent needs to make outbound HTTPS requests, prefer the standard images (Alpine-based) or mount a CA bundle into the container.
-- Standard images use `./fluidity-server` or `./fluidity-agent` as the entrypoint binary path
-- Scratch images use `/fluidity-server` or `/fluidity-agent` (absolute path, no shell)
-- Both HTTP and HTTPS are fully supported via CONNECT tunneling.
 
 ### 3. Configure Your Browser
 Set your browser's HTTP **and HTTPS** proxy to `localhost:8080`. Both protocols are fully supported.
