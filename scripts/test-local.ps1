@@ -214,13 +214,13 @@ try {
     # Use a simple Node.js WebSocket test if available, otherwise skip
     $wsTestScript = @"
 const WebSocket = require('ws');
-const HttpsProxyAgent = require('https-proxy-agent');
+const { HttpsProxyAgent } = require('https-proxy-agent');
 
 const proxyUrl = 'http://127.0.0.1:$ProxyPort';
 const wsUrl = 'wss://echo.websocket.org/';
 
-const agent = new HttpsProxyAgent(proxyUrl);
-const ws = new WebSocket(wsUrl, { agent });
+const agent = new HttpsProxyAgent(proxyUrl, { rejectUnauthorized: false });
+const ws = new WebSocket(wsUrl, { agent, rejectUnauthorized: false });
 
 let success = false;
 const timeout = setTimeout(() => {
@@ -256,16 +256,16 @@ ws.on('error', function(err) {
         throw "WebSocket test requires Node.js. Install from https://nodejs.org/"
     }
     
-    # Create temp test file
-    $tempWsTest = Join-Path $env:TEMP "fluidity-ws-test.js"
+    # Create temp test file in project directory so it can find node_modules
+    $tempWsTest = Join-Path (Get-Location) "fluidity-ws-test.js"
     $wsTestScript | Out-File -FilePath $tempWsTest -Encoding UTF8
     
-    # Check if ws module is available globally
+    # Check if ws module is available
     $wsResult = & node -e "try { require('ws'); require('https-proxy-agent'); console.log('OK'); } catch(e) { console.log('MISSING'); }" 2>&1
     
     if ($wsResult -notmatch "OK") {
         Remove-Item $tempWsTest -ErrorAction SilentlyContinue
-        throw "WebSocket test requires npm packages. Install with: npm install -g ws https-proxy-agent"
+        throw "WebSocket test requires npm packages. Install with: npm install ws https-proxy-agent"
     }
     
     try {

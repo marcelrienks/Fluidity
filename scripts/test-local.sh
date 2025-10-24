@@ -293,17 +293,17 @@ if ! command -v node &> /dev/null; then
     handle_error "WebSocket test requires Node.js. Install from https://nodejs.org/"
 fi
 
-# Create temp test file
-WS_TEST_SCRIPT=$(mktemp /tmp/fluidity-ws-test.XXXXXX.js)
+# Create temp test file in project directory so it can find node_modules
+WS_TEST_SCRIPT="fluidity-ws-test.js"
 cat > "$WS_TEST_SCRIPT" << 'WSEOF'
 const WebSocket = require('ws');
-const HttpsProxyAgent = require('https-proxy-agent');
+const { HttpsProxyAgent } = require('https-proxy-agent');
 
 const proxyUrl = 'http://127.0.0.1:PROXY_PORT';
 const wsUrl = 'wss://echo.websocket.org/';
 
-const agent = new HttpsProxyAgent(proxyUrl);
-const ws = new WebSocket(wsUrl, { agent });
+const agent = new HttpsProxyAgent(proxyUrl, { rejectUnauthorized: false });
+const ws = new WebSocket(wsUrl, { agent, rejectUnauthorized: false });
 
 let success = false;
 const timeout = setTimeout(() => {
@@ -340,7 +340,7 @@ WS_CHECK=$(node -e "try { require('ws'); require('https-proxy-agent'); console.l
 
 if [ "$WS_CHECK" != "OK" ]; then
     rm -f "$WS_TEST_SCRIPT"
-    handle_error "WebSocket test requires npm packages. Install with: npm install -g ws https-proxy-agent"
+    handle_error "WebSocket test requires npm packages. Install with: npm install ws https-proxy-agent"
 fi
 
 WS_OUTPUT=$(node "$WS_TEST_SCRIPT" 2>&1 || true)
