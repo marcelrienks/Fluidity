@@ -289,10 +289,13 @@ echo -e "\n${YELLOW}[Step 9] Testing WebSocket tunnel${NC}"
 echo -e "  ${CYAN}Testing wss://echo.websocket.org...${NC}"
 
 # Check if Node.js is available for WebSocket testing
-if command -v node &> /dev/null; then
-    # Create temp test file
-    WS_TEST_SCRIPT=$(mktemp /tmp/fluidity-ws-test.XXXXXX.js)
-    cat > "$WS_TEST_SCRIPT" << 'WSEOF'
+if ! command -v node &> /dev/null; then
+    handle_error "WebSocket test requires Node.js. Install from https://nodejs.org/"
+fi
+
+# Create temp test file
+WS_TEST_SCRIPT=$(mktemp /tmp/fluidity-ws-test.XXXXXX.js)
+cat > "$WS_TEST_SCRIPT" << 'WSEOF'
 const WebSocket = require('ws');
 const HttpsProxyAgent = require('https-proxy-agent');
 
@@ -328,31 +331,28 @@ ws.on('error', function(err) {
     process.exit(1);
 });
 WSEOF
-    
-    # Replace PROXY_PORT placeholder
-    sed -i "s/PROXY_PORT/$PROXY_PORT/g" "$WS_TEST_SCRIPT"
-    
-    # Check if ws module is available
-    WS_CHECK=$(node -e "try { require('ws'); require('https-proxy-agent'); console.log('OK'); } catch(e) { console.log('MISSING'); }" 2>&1)
-    
-    if [ "$WS_CHECK" = "OK" ]; then
-        WS_OUTPUT=$(node "$WS_TEST_SCRIPT" 2>&1 || true)
-        if echo "$WS_OUTPUT" | grep -q "SUCCESS"; then
-            echo -e "  ${GREEN}[OK] WebSocket tunnel test passed${NC}"
-        elif echo "$WS_OUTPUT" | grep -q "TIMEOUT"; then
-            echo -e "  ${YELLOW}[SKIP] WebSocket test timed out (may not be critical)${NC}"
-        else
-            echo -e "  ${YELLOW}[SKIP] WebSocket test failed: $WS_OUTPUT${NC}"
-        fi
-        rm -f "$WS_TEST_SCRIPT"
-    else
-        echo -e "  ${YELLOW}[SKIP] WebSocket test requires 'ws' and 'https-proxy-agent' npm packages${NC}"
-        echo -e "        ${CYAN}Install with: npm install -g ws https-proxy-agent${NC}"
-        rm -f "$WS_TEST_SCRIPT"
-    fi
+
+# Replace PROXY_PORT placeholder
+sed -i "s/PROXY_PORT/$PROXY_PORT/g" "$WS_TEST_SCRIPT"
+
+# Check if ws module is available
+WS_CHECK=$(node -e "try { require('ws'); require('https-proxy-agent'); console.log('OK'); } catch(e) { console.log('MISSING'); }" 2>&1)
+
+if [ "$WS_CHECK" != "OK" ]; then
+    rm -f "$WS_TEST_SCRIPT"
+    handle_error "WebSocket test requires npm packages. Install with: npm install -g ws https-proxy-agent"
+fi
+
+WS_OUTPUT=$(node "$WS_TEST_SCRIPT" 2>&1 || true)
+if echo "$WS_OUTPUT" | grep -q "SUCCESS"; then
+    echo -e "  ${GREEN}[OK] WebSocket tunnel test passed${NC}"
+    rm -f "$WS_TEST_SCRIPT"
+elif echo "$WS_OUTPUT" | grep -q "TIMEOUT"; then
+    rm -f "$WS_TEST_SCRIPT"
+    handle_error "WebSocket test timed out - connection to echo.websocket.org failed"
 else
-    echo -e "  ${YELLOW}[SKIP] WebSocket test requires Node.js (install from nodejs.org)${NC}"
-    echo -e "        ${CYAN}Core HTTP/HTTPS tests passed successfully${NC}"
+    rm -f "$WS_TEST_SCRIPT"
+    handle_error "WebSocket test failed: $WS_OUTPUT"
 fi
 
 # Success
