@@ -7,11 +7,14 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"fluidity/internal/agent/tunnel"
 	"fluidity/internal/shared/logging"
 	"fluidity/internal/shared/protocol"
+
+	"github.com/gorilla/websocket"
 )
 
 // Server handles local HTTP proxy requests
@@ -87,6 +90,12 @@ func (p *Server) Stop() error {
 func (p *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 	// Log the request (domain only for privacy)
 	p.logRequest(r)
+
+	// Check if this is a WebSocket upgrade request
+	if p.isWebSocketUpgrade(r) {
+		p.handleWebSocket(w, r)
+		return
+	}
 
 	// Handle CONNECT method for HTTPS tunneling
 	if r.Method == "CONNECT" {
@@ -276,4 +285,130 @@ func (p *Server) logRequest(r *http.Request) {
 	}
 
 	p.logger.Info("Proxying request", "method", r.Method, "domain", domain)
+}
+
+// isWebSocketUpgrade checks if the request is a WebSocket upgrade request
+func (p *Server) isWebSocketUpgrade(r *http.Request) bool {
+	return strings.ToLower(r.Header.Get("Upgrade")) == "websocket" &&
+		strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade")
+}
+
+// handleWebSocket handles WebSocket upgrade requests and establishes a WebSocket tunnel
+func (p *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	reqID := p.generateRequestID()
+
+	p.logger.Info("WebSocket upgrade request", "id", reqID, "url", r.URL.String())
+
+	// Ensure URL is absolute
+	wsURL := r.URL.String()
+	if !r.URL.IsAbs() {
+		scheme := "ws"
+		if r.TLS != nil {
+			scheme = "wss"
+		}
+		wsURL = fmt.Sprintf("%s://%s%s", scheme, r.Host, r.URL.Path)
+		if r.URL.RawQuery != "" {
+			wsURL += "?" + r.URL.RawQuery
+		}
+	}
+
+	// Request server to establish WebSocket connection
+	wsOpen := &protocol.WebSocketOpen{
+		ID:      reqID,
+		URL:     wsURL,
+		Headers: convertHeaders(r.Header),
+	}
+
+	ack, err := p.tunnelConn.WebSocketOpen(wsOpen)
+	if err != nil || !ack.Ok {
+		if err == nil {
+			err = fmt.Errorf(ack.Error)
+		}
+		p.logger.Error("WebSocket open failed", err, "id", reqID)
+		http.Error(w, "WebSocket tunnel error", http.StatusBadGateway)
+		return
+	}
+
+	p.logger.Debug("WebSocket opened successfully on server", "id", reqID)
+
+	// Upgrade client connection to WebSocket
+	upgrader := websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool {
+			return true // Accept all origins since we're a proxy
+		},
+	}
+
+	clientWS, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		p.logger.Error("Failed to upgrade client connection", err, "id", reqID)
+		_ = p.tunnelConn.WebSocketClose(reqID, websocket.CloseInternalServerErr, "upgrade failed")
+		return
+	}
+	defer clientWS.Close()
+
+	p.logger.Debug("Client WebSocket upgraded", "id", reqID)
+
+	// Create channels for bidirectional communication
+	clientToServer := make(chan *protocol.WebSocketMessage, 64)
+	serverToClient := p.tunnelConn.WebSocketMessageChannel(reqID)
+	done := make(chan struct{})
+
+	// Goroutine: Read from client WebSocket and send to tunnel
+	go func() {
+		defer close(clientToServer)
+		for {
+			messageType, data, err := clientWS.ReadMessage()
+			if err != nil {
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+					p.logger.Error("Client WebSocket read error", err, "id", reqID)
+				}
+				return
+			}
+
+			msg := &protocol.WebSocketMessage{
+				ID:          reqID,
+				MessageType: messageType,
+				Data:        data,
+			}
+
+			select {
+			case clientToServer <- msg:
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	// Goroutine: Send client messages through tunnel
+	go func() {
+		for msg := range clientToServer {
+			if err := p.tunnelConn.WebSocketSend(msg); err != nil {
+				p.logger.Error("Failed to send WebSocket message through tunnel", err, "id", reqID)
+				return
+			}
+		}
+	}()
+
+	// Main goroutine: Receive from tunnel and write to client WebSocket
+	for {
+		select {
+		case msg, ok := <-serverToClient:
+			if !ok {
+				// Channel closed, connection terminated
+				p.logger.Debug("Server WebSocket channel closed", "id", reqID)
+				close(done)
+				return
+			}
+
+			if err := clientWS.WriteMessage(msg.MessageType, msg.Data); err != nil {
+				p.logger.Error("Failed to write to client WebSocket", err, "id", reqID)
+				close(done)
+				return
+			}
+
+		case <-p.ctx.Done():
+			close(done)
+			return
+		}
+	}
 }

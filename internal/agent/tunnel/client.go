@@ -22,6 +22,8 @@ type Client struct {
 	requests    map[string]chan *protocol.Response
 	connectCh   map[string]chan *protocol.ConnectData
 	connectAcks map[string]chan *protocol.ConnectAck
+	wsCh        map[string]chan *protocol.WebSocketMessage
+	wsAcks      map[string]chan *protocol.WebSocketAck
 	logger      *logging.Logger
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -42,6 +44,8 @@ func NewClient(tlsConfig *tls.Config, serverAddr string, logLevel string) *Clien
 		requests:    make(map[string]chan *protocol.Response),
 		connectCh:   make(map[string]chan *protocol.ConnectData),
 		connectAcks: make(map[string]chan *protocol.ConnectAck),
+		wsCh:        make(map[string]chan *protocol.WebSocketMessage),
+		wsAcks:      make(map[string]chan *protocol.WebSocketAck),
 		logger:      logger,
 		ctx:         ctx,
 		cancel:      cancel,
@@ -280,6 +284,59 @@ func (c *Client) handleResponses() {
 			}
 			c.mu.Unlock()
 
+		case "ws_ack":
+			m, _ := env.Payload.(map[string]any)
+			b, _ := json.Marshal(m)
+			var ack protocol.WebSocketAck
+			if err := json.Unmarshal(b, &ack); err != nil {
+				c.logger.Error("Failed to parse ws_ack", err)
+				continue
+			}
+			c.mu.RLock()
+			ackCh := c.wsAcks[ack.ID]
+			c.mu.RUnlock()
+			if ackCh != nil {
+				select {
+				case ackCh <- &ack:
+				case <-time.After(1 * time.Second):
+					c.logger.Warn("WebSocket ack channel blocked", "id", ack.ID)
+				}
+			}
+
+		case "ws_message":
+			m, _ := env.Payload.(map[string]any)
+			b, _ := json.Marshal(m)
+			var msg protocol.WebSocketMessage
+			if err := json.Unmarshal(b, &msg); err != nil {
+				c.logger.Error("Failed to parse ws_message", err)
+				continue
+			}
+			c.mu.RLock()
+			ch := c.wsCh[msg.ID]
+			c.mu.RUnlock()
+			if ch != nil {
+				select {
+				case ch <- &msg:
+				default:
+					// Channel full, drop message (backpressure)
+					c.logger.Warn("WebSocket message channel full, dropping message", "id", msg.ID)
+				}
+			}
+
+		case "ws_close":
+			m, _ := env.Payload.(map[string]any)
+			b, _ := json.Marshal(m)
+			var cls protocol.WebSocketClose
+			if err := json.Unmarshal(b, &cls); err != nil {
+				continue
+			}
+			c.mu.Lock()
+			if ch := c.wsCh[cls.ID]; ch != nil {
+				close(ch)
+				delete(c.wsCh, cls.ID)
+			}
+			c.mu.Unlock()
+
 		default:
 			// Ignore unknown message types
 		}
@@ -387,6 +444,90 @@ func (c *Client) ConnectClose(id, errMsg string) error {
 func (c *Client) ConnectDataChannel(id string) <-chan *protocol.ConnectData {
 	c.mu.RLock()
 	ch := c.connectCh[id]
+	c.mu.RUnlock()
+	return ch
+}
+
+// WebSocketOpen requests a WebSocket connection to be established
+func (c *Client) WebSocketOpen(req *protocol.WebSocketOpen) (*protocol.WebSocketAck, error) {
+	c.mu.RLock()
+	if !c.connected || c.conn == nil {
+		c.mu.RUnlock()
+		return nil, fmt.Errorf("not connected to server")
+	}
+	conn := c.conn
+	c.mu.RUnlock()
+
+	// Prepare channels for this WebSocket
+	ackCh := make(chan *protocol.WebSocketAck, 1)
+	c.mu.Lock()
+	c.wsAcks[req.ID] = ackCh
+	if _, exists := c.wsCh[req.ID]; !exists {
+		c.wsCh[req.ID] = make(chan *protocol.WebSocketMessage, 64)
+	}
+	c.mu.Unlock()
+
+	env := protocol.Envelope{Type: "ws_open", Payload: req}
+	if err := json.NewEncoder(conn).Encode(env); err != nil {
+		c.mu.Lock()
+		delete(c.wsAcks, req.ID)
+		delete(c.wsCh, req.ID)
+		c.mu.Unlock()
+		return nil, fmt.Errorf("failed to send ws_open: %w", err)
+	}
+
+	// Wait for ack from server
+	select {
+	case ack := <-ackCh:
+		c.mu.Lock()
+		delete(c.wsAcks, req.ID)
+		c.mu.Unlock()
+		return ack, nil
+	case <-time.After(10 * time.Second):
+		c.mu.Lock()
+		delete(c.wsAcks, req.ID)
+		delete(c.wsCh, req.ID)
+		c.mu.Unlock()
+		return nil, fmt.Errorf("timeout waiting for ws_ack")
+	case <-c.ctx.Done():
+		c.mu.Lock()
+		delete(c.wsAcks, req.ID)
+		delete(c.wsCh, req.ID)
+		c.mu.Unlock()
+		return nil, fmt.Errorf("connection closed")
+	}
+}
+
+// WebSocketSend sends a WebSocket message through the tunnel
+func (c *Client) WebSocketSend(msg *protocol.WebSocketMessage) error {
+	c.mu.RLock()
+	if !c.connected || c.conn == nil {
+		c.mu.RUnlock()
+		return fmt.Errorf("not connected to server")
+	}
+	conn := c.conn
+	c.mu.RUnlock()
+	env := protocol.Envelope{Type: "ws_message", Payload: msg}
+	return json.NewEncoder(conn).Encode(env)
+}
+
+// WebSocketClose closes a WebSocket connection
+func (c *Client) WebSocketClose(id string, code int, errMsg string) error {
+	c.mu.RLock()
+	if !c.connected || c.conn == nil {
+		c.mu.RUnlock()
+		return nil
+	}
+	conn := c.conn
+	c.mu.RUnlock()
+	env := protocol.Envelope{Type: "ws_close", Payload: &protocol.WebSocketClose{ID: id, Code: code, Error: errMsg}}
+	return json.NewEncoder(conn).Encode(env)
+}
+
+// WebSocketMessageChannel returns the message channel for a given WebSocket id
+func (c *Client) WebSocketMessageChannel(id string) <-chan *protocol.WebSocketMessage {
+	c.mu.RLock()
+	ch := c.wsCh[id]
 	c.mu.RUnlock()
 	return ch
 }

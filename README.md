@@ -67,7 +67,34 @@ For technical architecture details, see the [Architecture Design](docs/architect
 
 ## Prerequisites
 
-Before building or running Fluidity, ensure you have the following installed:
+Before building or running Fluidity, ensure you have the following installed.
+
+### Automated Setup
+
+For your convenience, we provide automated setup scripts that will check for and install all prerequisites:
+
+- **Windows:** Run in PowerShell (as Administrator recommended):
+  ```powershell
+  .\scripts\setup-prerequisites.ps1
+  ```
+
+- **macOS:** Run in Terminal:
+  ```bash
+  chmod +x scripts/setup-prerequisites.sh
+  ./scripts/setup-prerequisites.sh
+  ```
+
+- **Linux:** Run in Terminal:
+  ```bash
+  chmod +x scripts/setup-prerequisites-linux.sh
+  ./scripts/setup-prerequisites-linux.sh
+  ```
+
+These scripts will automatically detect what's missing and install the required dependencies for your platform.
+
+### Manual Installation
+
+If you prefer to install prerequisites manually, or if the automated scripts don't work for your environment, here are the requirements:
 
 ### Go (>= 1.21)
 - **Windows:** Either download and run the installer from [go.dev](https://go.dev/dl/), or install via Chocolatey:
@@ -123,6 +150,35 @@ Before building or running Fluidity, ensure you have the following installed:
   ```bash
   sudo apt install openssl
   ```
+
+### Node.js (>= 18.x) - Required for WebSocket Testing
+- **Windows:** Either download and run the installer from [nodejs.org](https://nodejs.org/), or install via Chocolatey:
+  ```powershell
+  choco install nodejs
+  ```
+  After installation, verify:
+  ```powershell
+  node --version
+  npm --version
+  ```
+- **macOS:** Use Homebrew:
+  ```bash
+  brew install node
+  ```
+  or download from [nodejs.org](https://nodejs.org/).
+- **Linux:** Use your package manager (e.g., Ubuntu):
+  ```bash
+  curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+  sudo apt install -y nodejs
+  ```
+  or download from [nodejs.org](https://nodejs.org/).
+
+After installing Node.js, install the required npm packages for WebSocket testing:
+```bash
+npm install
+```
+
+This will install `ws` and `https-proxy-agent` packages locally as specified in `package.json`.
 
 > **Note:** If you do not wish to use `make`, you can run the build commands manually as described in the Quick Start Guide.
 
@@ -190,14 +246,28 @@ make -f Makefile.linux docker-build-agent
 
 ## Current Progress (Oct 24, 2025)
 
-Validated end-to-end HTTP and HTTPS tunneling via Docker containers with dev mTLS certs:
+**Phase 1 Complete** - Core infrastructure fully operational:
 
-- Built and ran server and agent containers on a user-defined Docker network
-- Agent established a TLS connection to the server (TLS 1.3) using client certs
-- Successfully proxied HTTP requests via `curl -x http://127.0.0.1:8080 http://example.com -I`
-- ✅ **HTTPS CONNECT tunneling fully implemented and working**
-- Successfully proxied HTTPS requests via `curl -x http://127.0.0.1:8080 https://example.com -I`
-- Full web browsing support for both HTTP and HTTPS websites
+✅ **Implemented Features:**
+- HTTP and HTTPS tunneling via CONNECT method
+- Full bidirectional WebSocket tunneling support
+- Mutual TLS (mTLS) authentication with private CA
+- Automated certificate generation (PowerShell & Bash scripts)
+- Dynamic server IP configuration with CLI override
+- Automatic reconnection with exponential backoff
+- Concurrent request handling with goroutines
+- Structured logging with privacy protections
+- Docker containerization (Alpine-based, ~43MB images)
+- Comprehensive automated testing (Docker & local binaries)
+- Cross-platform support (Windows/macOS/Linux)
+
+**Validated End-to-End:**
+- Built and ran server and agent containers on user-defined Docker network
+- Agent established TLS 1.3 connections using client certificates
+- Successfully proxied HTTP requests: `curl -x http://127.0.0.1:8080 http://example.com -I`
+- Successfully proxied HTTPS requests: `curl -x http://127.0.0.1:8080 https://example.com -I`
+- Full web browsing support for HTTP, HTTPS, and WebSocket protocols
+- Automated test scripts validate all functionality (test-docker.ps1/.sh, test-local.ps1/.sh)
 
 ## Disclaimer
 

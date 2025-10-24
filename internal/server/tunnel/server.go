@@ -16,6 +16,8 @@ import (
 	"fluidity/internal/shared/logging"
 	"fluidity/internal/shared/protocol"
 	tlsutil "fluidity/internal/shared/tls"
+
+	"github.com/gorilla/websocket"
 )
 
 // Server handles mTLS connections from agents
@@ -31,6 +33,8 @@ type Server struct {
 	connMutex   sync.RWMutex
 	tcpConns    map[string]net.Conn
 	tcpMutex    sync.RWMutex
+	wsConns     map[string]*websocket.Conn
+	wsMutex     sync.RWMutex
 }
 
 // NewServer creates a new tunnel server
@@ -64,6 +68,7 @@ func NewServer(tlsConfig *tls.Config, addr string, maxConns int, logLevel string
 		cancel:     cancel,
 		maxConns:   maxConns,
 		tcpConns:   make(map[string]net.Conn),
+		wsConns:    make(map[string]*websocket.Conn),
 	}, nil
 }
 
@@ -164,7 +169,7 @@ func (s *Server) handleConnection(conn *tls.Conn) {
 
 	decoder := json.NewDecoder(conn)
 	encoder := json.NewEncoder(conn)
-	
+
 	// Mutex to protect concurrent writes to encoder
 	var encoderMutex sync.Mutex
 
@@ -223,6 +228,35 @@ func (s *Server) handleConnection(conn *tls.Conn) {
 				continue
 			}
 			go s.handleConnectClose(&cls)
+
+		case "ws_open":
+			m, _ := env.Payload.(map[string]any)
+			b, _ := json.Marshal(m)
+			var open protocol.WebSocketOpen
+			if err := json.Unmarshal(b, &open); err != nil {
+				s.logger.Error("Failed to parse ws_open", err)
+				continue
+			}
+			go s.handleWebSocketOpen(&open, encoder, &encoderMutex)
+
+		case "ws_message":
+			m, _ := env.Payload.(map[string]any)
+			b, _ := json.Marshal(m)
+			var msg protocol.WebSocketMessage
+			if err := json.Unmarshal(b, &msg); err != nil {
+				s.logger.Error("Failed to parse ws_message", err)
+				continue
+			}
+			go s.handleWebSocketMessage(&msg)
+
+		case "ws_close":
+			m, _ := env.Payload.(map[string]any)
+			b, _ := json.Marshal(m)
+			var cls protocol.WebSocketClose
+			if err := json.Unmarshal(b, &cls); err != nil {
+				continue
+			}
+			go s.handleWebSocketClose(&cls)
 
 		default:
 			// Ignore unknown message types
@@ -442,5 +476,140 @@ func (s *Server) handleConnectClose(cls *protocol.ConnectClose) {
 
 	if targetConn != nil {
 		targetConn.Close()
+	}
+}
+
+// handleWebSocketOpen establishes a WebSocket connection to the target
+func (s *Server) handleWebSocketOpen(open *protocol.WebSocketOpen, encoder *json.Encoder, mu *sync.Mutex) {
+	s.logger.Info("WebSocket open request", "id", open.ID, "url", open.URL)
+
+	// Create WebSocket dialer
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 10 * time.Second,
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: false, // We should verify in production
+		},
+	}
+
+	// Convert headers
+	headers := http.Header{}
+	for name, values := range open.Headers {
+		for _, value := range values {
+			headers.Add(name, value)
+		}
+	}
+
+	// Dial the WebSocket
+	wsConn, _, err := dialer.Dial(open.URL, headers)
+	if err != nil {
+		s.logger.Error("WebSocket dial failed", err, "id", open.ID, "url", open.URL)
+		// Send error via ws_close
+		env := protocol.Envelope{Type: "ws_close", Payload: &protocol.WebSocketClose{ID: open.ID, Code: websocket.CloseInternalServerErr, Error: err.Error()}}
+		mu.Lock()
+		_ = encoder.Encode(env)
+		mu.Unlock()
+		return
+	}
+
+	s.logger.Debug("WebSocket dial successful", "id", open.ID, "url", open.URL)
+
+	// Store connection
+	s.wsMutex.Lock()
+	s.wsConns[open.ID] = wsConn
+	s.wsMutex.Unlock()
+
+	// Send ack
+	env := protocol.Envelope{Type: "ws_ack", Payload: &protocol.WebSocketAck{ID: open.ID, Ok: true}}
+	mu.Lock()
+	encErr := encoder.Encode(env)
+	mu.Unlock()
+	if encErr != nil {
+		s.logger.Error("Failed to send ws_ack", encErr, "id", open.ID)
+		wsConn.Close()
+		s.wsMutex.Lock()
+		delete(s.wsConns, open.ID)
+		s.wsMutex.Unlock()
+		return
+	}
+	s.logger.Debug("Sent ws_ack", "id", open.ID)
+
+	// Start reader goroutine: read from target WebSocket and send to agent
+	go func() {
+		defer func() {
+			s.logger.Debug("WebSocket reader goroutine exiting", "id", open.ID)
+			s.wsMutex.Lock()
+			delete(s.wsConns, open.ID)
+			s.wsMutex.Unlock()
+			wsConn.Close()
+			// Send close
+			closeEnv := protocol.Envelope{Type: "ws_close", Payload: &protocol.WebSocketClose{ID: open.ID}}
+			mu.Lock()
+			_ = encoder.Encode(closeEnv)
+			mu.Unlock()
+		}()
+
+		s.logger.Debug("WebSocket reader goroutine started", "id", open.ID)
+		for {
+			messageType, data, err := wsConn.ReadMessage()
+			if err != nil {
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+					s.logger.Error("WebSocket read error", err, "id", open.ID)
+				}
+				return
+			}
+
+			s.logger.Debug("WebSocket read message from target", "id", open.ID, "type", messageType, "bytes", len(data))
+			msgEnv := protocol.Envelope{Type: "ws_message", Payload: &protocol.WebSocketMessage{
+				ID:          open.ID,
+				MessageType: messageType,
+				Data:        data,
+			}}
+			mu.Lock()
+			encErr := encoder.Encode(msgEnv)
+			mu.Unlock()
+			if encErr != nil {
+				s.logger.Error("Failed to send ws_message", encErr, "id", open.ID)
+				return
+			}
+			s.logger.Debug("WebSocket sent message to agent", "id", open.ID, "type", messageType, "bytes", len(data))
+		}
+	}()
+}
+
+// handleWebSocketMessage writes a message to the target WebSocket
+func (s *Server) handleWebSocketMessage(msg *protocol.WebSocketMessage) {
+	s.wsMutex.RLock()
+	wsConn := s.wsConns[msg.ID]
+	s.wsMutex.RUnlock()
+
+	if wsConn == nil {
+		s.logger.Debug("WebSocket message received for unknown connection", "id", msg.ID)
+		return
+	}
+
+	s.logger.Debug("WebSocket writing message to target", "id", msg.ID, "type", msg.MessageType, "bytes", len(msg.Data))
+	if err := wsConn.WriteMessage(msg.MessageType, msg.Data); err != nil {
+		s.logger.Error("Failed to write to target WebSocket", err, "id", msg.ID)
+		s.handleWebSocketClose(&protocol.WebSocketClose{ID: msg.ID})
+	} else {
+		s.logger.Debug("WebSocket wrote message to target", "id", msg.ID, "type", msg.MessageType, "bytes", len(msg.Data))
+	}
+}
+
+// handleWebSocketClose closes the WebSocket connection
+func (s *Server) handleWebSocketClose(cls *protocol.WebSocketClose) {
+	s.wsMutex.Lock()
+	wsConn := s.wsConns[cls.ID]
+	delete(s.wsConns, cls.ID)
+	s.wsMutex.Unlock()
+
+	if wsConn != nil {
+		// Send close message to target if code is specified
+		if cls.Code != 0 {
+			closeMsg := websocket.FormatCloseMessage(cls.Code, cls.Error)
+			wsConn.WriteMessage(websocket.CloseMessage, closeMsg)
+		}
+		wsConn.Close()
+		s.logger.Debug("WebSocket connection closed", "id", cls.ID)
 	}
 }

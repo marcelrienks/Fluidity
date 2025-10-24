@@ -221,8 +221,8 @@ fi
 
 echo -e "  ${GREEN}[OK] Processes running${NC}"
 
-# Step 7: Test HTTP tunnel
-echo -e "\n${YELLOW}[Step 7] Testing HTTP tunnel${NC}"
+# Step 7: Test HTTP tunneling
+echo -e "\n${YELLOW}[Step 7] Testing HTTP tunneling (basic proxy functionality)${NC}"
 echo -e "  ${CYAN}URL: $TEST_URL${NC}"
 
 RESPONSE=$(curl -x "http://127.0.0.1:$PROXY_PORT" -s -m 10 -w "\nHTTP_CODE:%{http_code}\n" "$TEST_URL" 2>&1)
@@ -240,46 +240,119 @@ else
     fi
 fi
 
-# Step 8: Additional tests
-echo -e "\n${YELLOW}[Step 8] Additional tests${NC}"
+# Step 8: Test HTTPS and HTTP protocol support
+echo -e "\n${YELLOW}[Step 8] Testing HTTPS CONNECT and HTTP protocol support${NC}"
 
 # Track failures for final verdict
 TEST_FAILURES=()
 
-# Test HTTPS via CONNECT
+# Test HTTPS via CONNECT method
+echo -e "  ${CYAN}Testing HTTPS CONNECT tunneling...${NC}"
 GH_RESPONSE=$(curl -x "http://127.0.0.1:$PROXY_PORT" -s -m 10 -w "\nHTTP_CODE:%{http_code}\n" "https://api.github.com" 2>&1)
 GH_CODE=$(echo "$GH_RESPONSE" | grep "HTTP_CODE:" | sed 's/HTTP_CODE://')
 if [ "$GH_CODE" = "200" ]; then
-    echo -e "  GitHub API (HTTPS): ${GREEN}HTTP $GH_CODE${NC}"
+    echo -e "    ${GREEN}[OK] HTTPS (api.github.com): HTTP $GH_CODE${NC}"
 else
     if [ -z "$GH_CODE" ]; then
-        echo -e "  GitHub API (HTTPS): ${RED}Connection failed${NC}"
-        TEST_FAILURES+=("GitHub API connection failed")
+        echo -e "    ${RED}[FAIL] HTTPS (api.github.com): Connection failed${NC}"
+        TEST_FAILURES+=("HTTPS tunneling connection failed")
     else
-        echo -e "  GitHub API (HTTPS): ${RED}HTTP $GH_CODE${NC}"
-        TEST_FAILURES+=("GitHub API returned HTTP $GH_CODE")
+        echo -e "    ${RED}[FAIL] HTTPS (api.github.com): HTTP $GH_CODE${NC}"
+        TEST_FAILURES+=("HTTPS tunneling returned HTTP $GH_CODE")
     fi
 fi
 
-# Test HTTP
+# Test plain HTTP
+echo -e "  ${CYAN}Testing HTTP tunneling...${NC}"
 EX_RESPONSE=$(curl -x "http://127.0.0.1:$PROXY_PORT" -s -m 10 -w "\nHTTP_CODE:%{http_code}\n" "http://example.com" 2>&1)
 EX_CODE=$(echo "$EX_RESPONSE" | grep "HTTP_CODE:" | sed 's/HTTP_CODE://')
 if [ "$EX_CODE" = "200" ]; then
-    echo -e "  example.com (HTTP): ${GREEN}HTTP $EX_CODE${NC}"
+    echo -e "    ${GREEN}[OK] HTTP (example.com): HTTP $EX_CODE${NC}"
 else
     if [ -z "$EX_CODE" ]; then
-        echo -e "  example.com (HTTP): ${RED}Connection failed${NC}"
-        TEST_FAILURES+=("example.com connection failed")
+        echo -e "    ${RED}[FAIL] HTTP (example.com): Connection failed${NC}"
+        TEST_FAILURES+=("HTTP tunneling connection failed")
     else
-        echo -e "  example.com (HTTP): ${RED}HTTP $EX_CODE${NC}"
-        TEST_FAILURES+=("example.com returned HTTP $EX_CODE")
+        echo -e "    ${RED}[FAIL] HTTP (example.com): HTTP $EX_CODE${NC}"
+        TEST_FAILURES+=("HTTP tunneling returned HTTP $EX_CODE")
     fi
 fi
 
-# Fail if any additional tests failed
+# Fail if any protocol tests failed
 if [ ${#TEST_FAILURES[@]} -gt 0 ]; then
     FAILURE_MSG=$(IFS=', '; echo "${TEST_FAILURES[*]}")
-    handle_error "Additional tests failed: $FAILURE_MSG"
+    handle_error "Protocol tests failed: $FAILURE_MSG"
+fi
+
+# Step 9: Test WebSocket protocol support
+echo -e "\n${YELLOW}[Step 9] Testing WebSocket protocol tunneling${NC}"
+echo -e "  ${CYAN}Testing bidirectional WebSocket over secure tunnel...${NC}"
+
+# Check if Node.js is available for WebSocket testing
+if ! command -v node &> /dev/null; then
+    handle_error "WebSocket test requires Node.js. Install from https://nodejs.org/"
+fi
+
+# Create temp test file in project directory so it can find node_modules
+WS_TEST_SCRIPT="fluidity-ws-test.js"
+cat > "$WS_TEST_SCRIPT" << 'WSEOF'
+const WebSocket = require('ws');
+const { HttpsProxyAgent } = require('https-proxy-agent');
+
+const proxyUrl = 'http://127.0.0.1:PROXY_PORT';
+const wsUrl = 'wss://echo.websocket.org/';
+
+const agent = new HttpsProxyAgent(proxyUrl, { rejectUnauthorized: false });
+const ws = new WebSocket(wsUrl, { agent, rejectUnauthorized: false });
+
+let success = false;
+const timeout = setTimeout(() => {
+    console.log('TIMEOUT');
+    process.exit(1);
+}, 10000);
+
+ws.on('open', function() {
+    ws.send('WebSocket test message');
+});
+
+ws.on('message', function(data) {
+    if (data.toString().includes('test message')) {
+        console.log('SUCCESS');
+        success = true;
+        clearTimeout(timeout);
+        ws.close();
+        process.exit(0);
+    }
+});
+
+ws.on('error', function(err) {
+    console.log('ERROR: ' + err.message);
+    clearTimeout(timeout);
+    process.exit(1);
+});
+WSEOF
+
+# Replace PROXY_PORT placeholder
+sed -i "s/PROXY_PORT/$PROXY_PORT/g" "$WS_TEST_SCRIPT"
+
+# Check if ws module is available
+WS_CHECK=$(node -e "try { require('ws'); require('https-proxy-agent'); console.log('OK'); } catch(e) { console.log('MISSING'); }" 2>&1)
+
+if [ "$WS_CHECK" != "OK" ]; then
+    rm -f "$WS_TEST_SCRIPT"
+    handle_error "WebSocket test requires npm packages. Install with: npm install ws https-proxy-agent"
+fi
+
+WS_OUTPUT=$(node "$WS_TEST_SCRIPT" 2>&1 || true)
+if echo "$WS_OUTPUT" | grep -q "SUCCESS"; then
+    echo -e "    ${GREEN}[OK] WebSocket tunneling test passed (echo.websocket.org)${NC}"
+    rm -f "$WS_TEST_SCRIPT"
+elif echo "$WS_OUTPUT" | grep -q "TIMEOUT"; then
+    rm -f "$WS_TEST_SCRIPT"
+    handle_error "WebSocket tunneling timed out - connection to echo.websocket.org failed"
+else
+    rm -f "$WS_TEST_SCRIPT"
+    handle_error "WebSocket tunneling test failed: $WS_OUTPUT"
 fi
 
 # Success

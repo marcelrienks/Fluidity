@@ -24,3 +24,10 @@ logs/
 *.log
 *.out
 *.err
+
+# Node.js dependencies (for WebSocket testing)
+node_modules/
+# Note: package.json and package-lock.json should be tracked in Git
+
+# Temporary test files
+fluidity-ws-test.js
