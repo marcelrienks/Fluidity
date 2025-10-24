@@ -173,13 +173,12 @@ If you prefer to install prerequisites manually, or if the automated scripts don
   ```
   or download from [nodejs.org](https://nodejs.org/).
 
-### npm Packages - Required for WebSocket Testing
-After installing Node.js, install the required packages globally:
+After installing Node.js, install the required npm packages for WebSocket testing:
 ```bash
-npm install -g ws https-proxy-agent
+npm install
 ```
 
-These packages are required for the WebSocket test suites in both local and Docker test scripts.
+This will install `ws` and `https-proxy-agent` packages locally as specified in `package.json`.
 
 > **Note:** If you do not wish to use `make`, you can run the build commands manually as described in the Quick Start Guide.
 
@@ -247,14 +246,28 @@ make -f Makefile.linux docker-build-agent
 
 ## Current Progress (Oct 24, 2025)
 
-Validated end-to-end HTTP and HTTPS tunneling via Docker containers with dev mTLS certs:
+**Phase 1 Complete** - Core infrastructure fully operational:
 
-- Built and ran server and agent containers on a user-defined Docker network
-- Agent established a TLS connection to the server (TLS 1.3) using client certs
-- Successfully proxied HTTP requests via `curl -x http://127.0.0.1:8080 http://example.com -I`
-- ✅ **HTTPS CONNECT tunneling fully implemented and working**
-- Successfully proxied HTTPS requests via `curl -x http://127.0.0.1:8080 https://example.com -I`
-- Full web browsing support for both HTTP and HTTPS websites
+✅ **Implemented Features:**
+- HTTP and HTTPS tunneling via CONNECT method
+- Full bidirectional WebSocket tunneling support
+- Mutual TLS (mTLS) authentication with private CA
+- Automated certificate generation (PowerShell & Bash scripts)
+- Dynamic server IP configuration with CLI override
+- Automatic reconnection with exponential backoff
+- Concurrent request handling with goroutines
+- Structured logging with privacy protections
+- Docker containerization (Alpine-based, ~43MB images)
+- Comprehensive automated testing (Docker & local binaries)
+- Cross-platform support (Windows/macOS/Linux)
+
+**Validated End-to-End:**
+- Built and ran server and agent containers on user-defined Docker network
+- Agent established TLS 1.3 connections using client certificates
+- Successfully proxied HTTP requests: `curl -x http://127.0.0.1:8080 http://example.com -I`
+- Successfully proxied HTTPS requests: `curl -x http://127.0.0.1:8080 https://example.com -I`
+- Full web browsing support for HTTP, HTTPS, and WebSocket protocols
+- Automated test scripts validate all functionality (test-docker.ps1/.sh, test-local.ps1/.sh)
 
 ## Disclaimer
 

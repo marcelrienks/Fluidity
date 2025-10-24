@@ -142,8 +142,8 @@ try {
     
     Write-Host "  [OK] Processes running" -ForegroundColor Green
 
-    # Step 7: Test HTTP tunnel
-    Write-Host "`n[Step 7] Testing HTTP tunnel" -ForegroundColor Yellow
+    # Step 7: Test HTTP tunneling
+    Write-Host "`n[Step 7] Testing HTTP tunneling (basic proxy functionality)" -ForegroundColor Yellow
     Write-Host "  URL: $TestUrl" -ForegroundColor Cyan
     
     $response = curl.exe -x "http://127.0.0.1:$ProxyPort" -s -m 10 -w "`nHTTP_CODE:%{http_code}`n" "$TestUrl"
@@ -162,54 +162,54 @@ try {
         throw "Could not extract HTTP code from response"
     }
 
-    # Step 8: Additional tests
-    Write-Host "`n[Step 8] Additional tests" -ForegroundColor Yellow
+    # Step 8: Test HTTPS and HTTP protocol support
+    Write-Host "`n[Step 8] Testing HTTPS CONNECT and HTTP protocol support" -ForegroundColor Yellow
     
     # Track failures for final verdict
     $testFailures = @()
     
-    # Test HTTPS via CONNECT
+    # Test HTTPS via CONNECT method
+    Write-Host "  Testing HTTPS CONNECT tunneling..." -ForegroundColor Cyan
     $ghResponse = curl.exe -x "http://127.0.0.1:$ProxyPort" -s -m 10 -w "`nHTTP_CODE:%{http_code}`n" "https://api.github.com" 2>&1
     $ghCodeMatch = $ghResponse | Select-String "HTTP_CODE:(\d+)"
     if ($ghCodeMatch) {
         $ghCode = $ghCodeMatch.Matches[0].Groups[1].Value
         if ($ghCode -eq "200") {
-            Write-Host "  GitHub API (HTTPS): HTTP $ghCode" -ForegroundColor Green
+            Write-Host "    [OK] HTTPS (api.github.com): HTTP $ghCode" -ForegroundColor Green
         } else {
-            Write-Host "  GitHub API (HTTPS): HTTP $ghCode" -ForegroundColor Red
-            $testFailures += "GitHub API returned HTTP $ghCode"
+            Write-Host "    [FAIL] HTTPS (api.github.com): HTTP $ghCode" -ForegroundColor Red
+            $testFailures += "HTTPS tunneling returned HTTP $ghCode"
         }
     } else {
-        Write-Host "  GitHub API (HTTPS): Connection failed" -ForegroundColor Red
-        $testFailures += "GitHub API connection failed"
+        Write-Host "    [FAIL] HTTPS (api.github.com): Connection failed" -ForegroundColor Red
+        $testFailures += "HTTPS tunneling connection failed"
     }
     
-    # Test HTTP
+    # Test plain HTTP
+    Write-Host "  Testing HTTP tunneling..." -ForegroundColor Cyan
     $exResponse = curl.exe -x "http://127.0.0.1:$ProxyPort" -s -m 10 -w "`nHTTP_CODE:%{http_code}`n" "http://example.com" 2>&1
     $exCodeMatch = $exResponse | Select-String "HTTP_CODE:(\d+)"
     if ($exCodeMatch) {
         $exCode = $exCodeMatch.Matches[0].Groups[1].Value
         if ($exCode -eq "200") {
-            Write-Host "  example.com (HTTP): HTTP $exCode" -ForegroundColor Green
+            Write-Host "    [OK] HTTP (example.com): HTTP $exCode" -ForegroundColor Green
         } else {
-            Write-Host "  example.com (HTTP): HTTP $exCode" -ForegroundColor Red
-            $testFailures += "example.com returned HTTP $exCode"
+            Write-Host "    [FAIL] HTTP (example.com): HTTP $exCode" -ForegroundColor Red
+            $testFailures += "HTTP tunneling returned HTTP $exCode"
         }
     } else {
-        Write-Host "  example.com (HTTP): Connection failed" -ForegroundColor Red
-        $testFailures += "example.com connection failed"
+        Write-Host "    [FAIL] HTTP (example.com): Connection failed" -ForegroundColor Red
+        $testFailures += "HTTP tunneling connection failed"
     }
     
-    # Fail if any additional tests failed
+    # Fail if any protocol tests failed
     if ($testFailures.Count -gt 0) {
-        throw "Additional tests failed: $($testFailures -join ', ')"  
+        throw "Protocol tests failed: $($testFailures -join ', ')"  
     }
 
-    # Step 9: WebSocket test
-    Write-Host "`n[Step 9] Testing WebSocket tunnel" -ForegroundColor Yellow
-    
-    # Test WebSocket echo service
-    Write-Host "  Testing wss://echo.websocket.org..." -ForegroundColor Cyan
+    # Step 9: Test WebSocket protocol support
+    Write-Host "`n[Step 9] Testing WebSocket protocol tunneling" -ForegroundColor Yellow
+    Write-Host "  Testing bidirectional WebSocket over secure tunnel..." -ForegroundColor Cyan
     
     # Use a simple Node.js WebSocket test if available, otherwise skip
     $wsTestScript = @"
@@ -271,11 +271,11 @@ ws.on('error', function(err) {
     try {
         $wsOutput = & node $tempWsTest 2>&1 | Out-String
         if ($wsOutput -match "SUCCESS") {
-            Write-Host "  [OK] WebSocket tunnel test passed" -ForegroundColor Green
+            Write-Host "    [OK] WebSocket tunneling test passed (echo.websocket.org)" -ForegroundColor Green
         } elseif ($wsOutput -match "TIMEOUT") {
-            throw "WebSocket test timed out - connection to echo.websocket.org failed"
+            throw "WebSocket tunneling timed out - connection to echo.websocket.org failed"
         } else {
-            throw "WebSocket test failed: $wsOutput"
+            throw "WebSocket tunneling test failed: $wsOutput"
         }
     } finally {
         Remove-Item $tempWsTest -ErrorAction SilentlyContinue

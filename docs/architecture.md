@@ -1,6 +1,9 @@
 # Architecture Design Document
 # Fluidity - HTTP Tunnel Solution
 
+**Last Updated:** October 24, 2025
+**Status:** Phase 1 Complete - Core Infrastructure Implemented
+
 ---
 
 ## 1. Architecture Overview
@@ -494,6 +497,12 @@ func (s *Server) processRequest(req *protocol.Request, encoder *json.Encoder) {
 // Package: internal/shared/protocol
 package protocol
 
+// Envelope wraps all message types with type discrimination
+type Envelope struct {
+    Type    string      `json:"type"`
+    Payload interface{} `json:"payload"`
+}
+
 // Request represents an HTTP request through the tunnel
 type Request struct {
     ID      string              `json:"id"`
@@ -510,6 +519,52 @@ type Response struct {
     Headers    map[string][]string `json:"headers"`
     Body       []byte              `json:"body,omitempty"`
     Error      string              `json:"error,omitempty"`
+}
+
+// ConnectRequest initiates HTTPS CONNECT tunneling
+type ConnectRequest struct {
+    ID   string `json:"id"`
+    Host string `json:"host"`
+}
+
+// ConnectAck acknowledges CONNECT establishment
+type ConnectAck struct {
+    ID      string `json:"id"`
+    Success bool   `json:"success"`
+    Error   string `json:"error,omitempty"`
+}
+
+// ConnectData carries bidirectional CONNECT stream data
+type ConnectData struct {
+    ID   string `json:"id"`
+    Data []byte `json:"data"`
+}
+
+// WebSocketOpen requests WebSocket connection establishment
+type WebSocketOpen struct {
+    ID      string              `json:"id"`
+    URL     string              `json:"url"`
+    Headers map[string][]string `json:"headers"`
+}
+
+// WebSocketAck acknowledges WebSocket connection
+type WebSocketAck struct {
+    ID      string `json:"id"`
+    Success bool   `json:"success"`
+    Error   string `json:"error,omitempty"`
+}
+
+// WebSocketMessage carries WebSocket frame data
+type WebSocketMessage struct {
+    ID   string `json:"id"`
+    Data []byte `json:"data"`
+}
+
+// WebSocketClose signals WebSocket connection closure
+type WebSocketClose struct {
+    ID    string `json:"id"`
+    Code  int    `json:"code"`
+    Error string `json:"error,omitempty"`
 }
 ```
 
@@ -629,79 +684,83 @@ func SaveConfig(configFile string, config interface{}) error {
 
 ### 4.1 Development Phases
 
-#### Phase 1: Core Infrastructure (Weeks 1-4)
-1. **Project Setup**
-   - Initialize Go modules and project structure
-   - Set up basic Makefile and build scripts
-   - Create Docker configurations
+#### Phase 1: Core Infrastructure ✅ COMPLETE (October 2025)
+1. **Project Setup** ✅
+   - Initialized Go modules and project structure
+   - Set up platform-specific Makefiles (Windows/macOS/Linux)
+   - Created Docker configurations with multi-stage builds
 
-2. **Basic Protocol Implementation**
-   - Implement tunnel protocol (Request/Response structs)
-   - Basic JSON serialization/deserialization
-   - Simple TCP connection handling
+2. **Basic Protocol Implementation** ✅
+   - Implemented tunnel protocol (Request/Response/CONNECT/WebSocket structs)
+   - JSON serialization/deserialization with envelope pattern
+   - Secure TLS connection handling
 
-3. **Certificate Management**
-   - Certificate generation utilities
+3. **Certificate Management** ✅
+   - Certificate generation utilities (PowerShell and Bash scripts)
    - mTLS configuration loading
-   - Basic certificate validation
+   - Certificate validation against private CA
 
-4. **Minimal Agent Implementation**
-   - Simple HTTP proxy server
-   - Basic tunnel client connection
-   - Request forwarding (without mTLS initially)
+4. **Agent Implementation** ✅
+   - HTTP/HTTPS proxy server on port 8080
+   - Tunnel client connection with mTLS
+   - Request forwarding with CONNECT method support
+   - WebSocket tunneling support
 
-5. **Minimal Server Implementation**
-   - Basic TCP server
+5. **Server Implementation** ✅
+   - mTLS TCP server on port 8443
    - HTTP client for target requests
-   - Response forwarding
+   - Response forwarding through tunnel
+   - WebSocket connection handling
 
-#### Phase 2: Security and mTLS (Weeks 5-6)
-1. **mTLS Integration**
+#### Phase 2: Security and mTLS ✅ COMPLETE (October 2025)
+1. **mTLS Integration** ✅
    - Client certificate authentication
    - Server certificate validation
    - TLS 1.3 enforcement
 
-2. **Configuration Management**
-   - YAML configuration files
-   - CLI parameter handling
+2. **Configuration Management** ✅
+   - YAML configuration files (server.yaml, agent.yaml)
+   - CLI parameter handling with Cobra
    - Environment variable support
+   - Server IP configuration with CLI override
 
-3. **Error Handling and Logging**
-   - Structured logging implementation
-   - Error propagation
+3. **Error Handling and Logging** ✅
+   - Structured logging implementation with logrus
+   - Error propagation with context
    - Debug logging for troubleshooting
+   - Privacy-focused minimal logging
 
-#### Phase 3: Production Features (Weeks 7-8)
-1. **Connection Management**
-   - Connection pooling
-   - Automatic reconnection
-   - Graceful shutdown
+#### Phase 3: Production Features ✅ MOSTLY COMPLETE (October 2025)
+1. **Connection Management** ✅
+   - Automatic reconnection with exponential backoff
+   - Graceful shutdown with context cancellation
+   - Connection state management
 
-2. **Configuration Updates**
+2. **Configuration Updates** ✅
    - Dynamic IP configuration
    - Persistent configuration updates
    - CLI override functionality
 
-3. **Performance Optimization**
-   - Concurrent request handling
-   - Connection reuse
-   - Request/response caching (if needed)
+3. **Performance Optimization** 🚧
+   - Concurrent request handling with goroutines
+   - Channel-based request/response matching
+   - Connection pooling (needs optimization)
 
-#### Phase 4: Containerization and Deployment (Weeks 9-10)
-1. **Docker Implementation**
+#### Phase 4: Containerization and Deployment ✅ MOSTLY COMPLETE (October 2025)
+1. **Docker Implementation** ✅
    - Multi-stage Docker builds
-   - Container optimization
-   - Certificate embedding
+   - Alpine-based containers (~43MB)
+   - Certificate volume mounting
 
-2. **Deployment Automation**
-   - Build scripts
-   - Deployment scripts
-   - Cloud provider deployment guides
+2. **Deployment Automation** 🚧
+   - Build scripts for all platforms
+   - Automated testing scripts (test-docker.ps1/.sh, test-local.ps1/.sh)
+   - Cloud provider deployment guides (pending)
 
-3. **Testing and Documentation**
-   - Unit tests
-   - Integration tests
-   - User documentation
+3. **Testing and Documentation** ✅
+   - Integration tests (HTTP, HTTPS, WebSocket)
+   - Automated end-to-end testing
+   - Comprehensive user documentation
 
 ### 4.2 Key Implementation Considerations
 
