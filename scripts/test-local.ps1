@@ -146,7 +146,7 @@ try {
     Write-Host "`n[Step 7] Testing HTTP tunnel" -ForegroundColor Yellow
     Write-Host "  URL: $TestUrl" -ForegroundColor Cyan
     
-    $response = curl.exe -x "http://127.0.0.1:$ProxyPort" -s -w "`nHTTP_CODE:%{http_code}`n" "$TestUrl"
+    $response = curl.exe -x "http://127.0.0.1:$ProxyPort" -s -m 10 -w "`nHTTP_CODE:%{http_code}`n" "$TestUrl"
     $httpCodeMatch = $response | Select-String "HTTP_CODE:(\d+)"
     
     if ($httpCodeMatch) {
@@ -165,26 +165,44 @@ try {
     # Step 8: Additional tests
     Write-Host "`n[Step 8] Additional tests" -ForegroundColor Yellow
     
-    $ghResponse = curl.exe -x "http://127.0.0.1:$ProxyPort" -s -w "`nHTTP_CODE:%{http_code}`n" "https://api.github.com" 2>&1
+    # Track failures for final verdict
+    $testFailures = @()
+    
+    # Test HTTPS via CONNECT
+    $ghResponse = curl.exe -x "http://127.0.0.1:$ProxyPort" -s -m 10 -w "`nHTTP_CODE:%{http_code}`n" "https://api.github.com" 2>&1
     $ghCodeMatch = $ghResponse | Select-String "HTTP_CODE:(\d+)"
     if ($ghCodeMatch) {
         $ghCode = $ghCodeMatch.Matches[0].Groups[1].Value
         if ($ghCode -eq "200") {
-            Write-Host "  GitHub API: HTTP $ghCode" -ForegroundColor Green
+            Write-Host "  GitHub API (HTTPS): HTTP $ghCode" -ForegroundColor Green
         } else {
-            Write-Host "  GitHub API: HTTP $ghCode" -ForegroundColor Yellow
+            Write-Host "  GitHub API (HTTPS): HTTP $ghCode" -ForegroundColor Red
+            $testFailures += "GitHub API returned HTTP $ghCode"
         }
+    } else {
+        Write-Host "  GitHub API (HTTPS): Connection failed" -ForegroundColor Red
+        $testFailures += "GitHub API connection failed"
     }
     
-    $exResponse = curl.exe -x "http://127.0.0.1:$ProxyPort" -s -w "`nHTTP_CODE:%{http_code}`n" "http://example.com" 2>&1
+    # Test HTTP
+    $exResponse = curl.exe -x "http://127.0.0.1:$ProxyPort" -s -m 10 -w "`nHTTP_CODE:%{http_code}`n" "http://example.com" 2>&1
     $exCodeMatch = $exResponse | Select-String "HTTP_CODE:(\d+)"
     if ($exCodeMatch) {
         $exCode = $exCodeMatch.Matches[0].Groups[1].Value
         if ($exCode -eq "200") {
-            Write-Host "  example.com: HTTP $exCode" -ForegroundColor Green
+            Write-Host "  example.com (HTTP): HTTP $exCode" -ForegroundColor Green
         } else {
-            Write-Host "  example.com: HTTP $exCode" -ForegroundColor Yellow
+            Write-Host "  example.com (HTTP): HTTP $exCode" -ForegroundColor Red
+            $testFailures += "example.com returned HTTP $exCode"
         }
+    } else {
+        Write-Host "  example.com (HTTP): Connection failed" -ForegroundColor Red
+        $testFailures += "example.com connection failed"
+    }
+    
+    # Fail if any additional tests failed
+    if ($testFailures.Count -gt 0) {
+        throw "Additional tests failed: $($testFailures -join ', ')"  
     }
 
     # Success

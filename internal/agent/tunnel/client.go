@@ -21,6 +21,7 @@ type Client struct {
 	mu          sync.RWMutex
 	requests    map[string]chan *protocol.Response
 	connectCh   map[string]chan *protocol.ConnectData
+	connectAcks map[string]chan *protocol.ConnectAck
 	logger      *logging.Logger
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -29,15 +30,19 @@ type Client struct {
 }
 
 // NewClient creates a new tunnel client
-func NewClient(tlsConfig *tls.Config, serverAddr string) *Client {
+func NewClient(tlsConfig *tls.Config, serverAddr string, logLevel string) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	logger := logging.NewLogger("tunnel-client")
+	logger.SetLevel(logLevel)
 
 	return &Client{
 		config:      tlsConfig,
 		serverAddr:  serverAddr,
 		requests:    make(map[string]chan *protocol.Response),
 		connectCh:   make(map[string]chan *protocol.ConnectData),
-		logger:      logging.NewLogger("tunnel-client"),
+		connectAcks: make(map[string]chan *protocol.ConnectAck),
+		logger:      logger,
 		ctx:         ctx,
 		cancel:      cancel,
 		reconnectCh: make(chan bool, 1),
@@ -224,8 +229,23 @@ func (c *Client) handleResponses() {
 			}
 
 		case "connect_ack":
-			// Ignore ack for now (we return synthetic ack immediately on ConnectOpen)
-			continue
+			m, _ := env.Payload.(map[string]any)
+			b, _ := json.Marshal(m)
+			var ack protocol.ConnectAck
+			if err := json.Unmarshal(b, &ack); err != nil {
+				c.logger.Error("Failed to parse connect_ack", err)
+				continue
+			}
+			c.mu.RLock()
+			ackCh := c.connectAcks[ack.ID]
+			c.mu.RUnlock()
+			if ackCh != nil {
+				select {
+				case ackCh <- &ack:
+				case <-time.After(1 * time.Second):
+					c.logger.Warn("Connect ack channel blocked", "id", ack.ID)
+				}
+			}
 
 		case "connect_data":
 			m, _ := env.Payload.(map[string]any)
@@ -297,8 +317,10 @@ func (c *Client) ConnectOpen(id, address string) (*protocol.ConnectAck, error) {
 	conn := c.conn
 	c.mu.RUnlock()
 
-	// Prepare data channel for this connection
+	// Prepare channels for this connection
+	ackCh := make(chan *protocol.ConnectAck, 1)
 	c.mu.Lock()
+	c.connectAcks[id] = ackCh
 	if _, exists := c.connectCh[id]; !exists {
 		c.connectCh[id] = make(chan *protocol.ConnectData, 64)
 	}
@@ -306,12 +328,33 @@ func (c *Client) ConnectOpen(id, address string) (*protocol.ConnectAck, error) {
 
 	env := protocol.Envelope{Type: "connect_open", Payload: &protocol.ConnectOpen{ID: id, Address: address}}
 	if err := json.NewEncoder(conn).Encode(env); err != nil {
+		c.mu.Lock()
+		delete(c.connectAcks, id)
+		delete(c.connectCh, id)
+		c.mu.Unlock()
 		return nil, fmt.Errorf("failed to send connect_open: %w", err)
 	}
 
-	// Return synthetic ack; server will send connect_data or connect_close on failure
-	ack := &protocol.ConnectAck{ID: id, Ok: true}
-	return ack, nil
+	// Wait for real ack from server
+	select {
+	case ack := <-ackCh:
+		c.mu.Lock()
+		delete(c.connectAcks, id)
+		c.mu.Unlock()
+		return ack, nil
+	case <-time.After(10 * time.Second):
+		c.mu.Lock()
+		delete(c.connectAcks, id)
+		delete(c.connectCh, id)
+		c.mu.Unlock()
+		return nil, fmt.Errorf("timeout waiting for connect_ack")
+	case <-c.ctx.Done():
+		c.mu.Lock()
+		delete(c.connectAcks, id)
+		delete(c.connectCh, id)
+		c.mu.Unlock()
+		return nil, fmt.Errorf("connection closed")
+	}
 }
 
 // ConnectSend sends a data chunk over the tunnel

@@ -123,10 +123,10 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		"ca_file", cfg.CACertFile)
 
 	// Create tunnel client
-	tunnelClient := tunnel.NewClient(tlsConfig, cfg.GetServerAddress())
+	tunnelClient := tunnel.NewClient(tlsConfig, cfg.GetServerAddress(), cfg.LogLevel)
 
 	// Create proxy server
-	proxyServer := proxy.NewServer(cfg.LocalProxyPort, tunnelClient)
+	proxyServer := proxy.NewServer(cfg.LocalProxyPort, tunnelClient, cfg.LogLevel)
 
 	// Create context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())

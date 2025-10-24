@@ -225,7 +225,7 @@ echo -e "  ${GREEN}[OK] Processes running${NC}"
 echo -e "\n${YELLOW}[Step 7] Testing HTTP tunnel${NC}"
 echo -e "  ${CYAN}URL: $TEST_URL${NC}"
 
-RESPONSE=$(curl -x "http://127.0.0.1:$PROXY_PORT" -s -w "\nHTTP_CODE:%{http_code}\n" "$TEST_URL" 2>&1)
+RESPONSE=$(curl -x "http://127.0.0.1:$PROXY_PORT" -s -m 10 -w "\nHTTP_CODE:%{http_code}\n" "$TEST_URL" 2>&1)
 HTTP_CODE=$(echo "$RESPONSE" | grep "HTTP_CODE:" | sed 's/HTTP_CODE://')
 
 if [ "$HTTP_CODE" = "200" ]; then
@@ -243,20 +243,43 @@ fi
 # Step 8: Additional tests
 echo -e "\n${YELLOW}[Step 8] Additional tests${NC}"
 
-GH_RESPONSE=$(curl -x "http://127.0.0.1:$PROXY_PORT" -s -w "\nHTTP_CODE:%{http_code}\n" "https://api.github.com" 2>&1)
+# Track failures for final verdict
+TEST_FAILURES=()
+
+# Test HTTPS via CONNECT
+GH_RESPONSE=$(curl -x "http://127.0.0.1:$PROXY_PORT" -s -m 10 -w "\nHTTP_CODE:%{http_code}\n" "https://api.github.com" 2>&1)
 GH_CODE=$(echo "$GH_RESPONSE" | grep "HTTP_CODE:" | sed 's/HTTP_CODE://')
 if [ "$GH_CODE" = "200" ]; then
-    echo -e "  GitHub API: ${GREEN}HTTP $GH_CODE${NC}"
+    echo -e "  GitHub API (HTTPS): ${GREEN}HTTP $GH_CODE${NC}"
 else
-    echo -e "  GitHub API: ${YELLOW}HTTP $GH_CODE${NC}"
+    if [ -z "$GH_CODE" ]; then
+        echo -e "  GitHub API (HTTPS): ${RED}Connection failed${NC}"
+        TEST_FAILURES+=("GitHub API connection failed")
+    else
+        echo -e "  GitHub API (HTTPS): ${RED}HTTP $GH_CODE${NC}"
+        TEST_FAILURES+=("GitHub API returned HTTP $GH_CODE")
+    fi
 fi
 
-EX_RESPONSE=$(curl -x "http://127.0.0.1:$PROXY_PORT" -s -w "\nHTTP_CODE:%{http_code}\n" "http://example.com" 2>&1)
+# Test HTTP
+EX_RESPONSE=$(curl -x "http://127.0.0.1:$PROXY_PORT" -s -m 10 -w "\nHTTP_CODE:%{http_code}\n" "http://example.com" 2>&1)
 EX_CODE=$(echo "$EX_RESPONSE" | grep "HTTP_CODE:" | sed 's/HTTP_CODE://')
 if [ "$EX_CODE" = "200" ]; then
-    echo -e "  example.com: ${GREEN}HTTP $EX_CODE${NC}"
+    echo -e "  example.com (HTTP): ${GREEN}HTTP $EX_CODE${NC}"
 else
-    echo -e "  example.com: ${YELLOW}HTTP $EX_CODE${NC}"
+    if [ -z "$EX_CODE" ]; then
+        echo -e "  example.com (HTTP): ${RED}Connection failed${NC}"
+        TEST_FAILURES+=("example.com connection failed")
+    else
+        echo -e "  example.com (HTTP): ${RED}HTTP $EX_CODE${NC}"
+        TEST_FAILURES+=("example.com returned HTTP $EX_CODE")
+    fi
+fi
+
+# Fail if any additional tests failed
+if [ ${#TEST_FAILURES[@]} -gt 0 ]; then
+    FAILURE_MSG=$(IFS=', '; echo "${TEST_FAILURES[*]}")
+    handle_error "Additional tests failed: $FAILURE_MSG"
 fi
 
 # Success
