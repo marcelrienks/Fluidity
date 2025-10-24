@@ -42,8 +42,9 @@ This document outlines all outstanding work required for Phase 1, organized by p
 - [ ] Enhance retry logic for request forwarding
 
 ### Testing
-- [ ] Develop comprehensive integration tests for HTTP tunneling
-- [ ] Develop integration tests for HTTPS/CONNECT tunneling
+- [x] Develop integration tests for HTTP tunneling (COMPLETE - integrated into test scripts)
+- [x] Develop integration tests for HTTPS/CONNECT tunneling (COMPLETE - integrated into test scripts)
+- [x] Add WebSocket testing support (COMPLETE - optional test step in all test scripts)
 - [ ] Test and analyze detection by endpoint security tools (EDR/AV)
 - [ ] Implement mitigations to avoid triggering security monitoring alerts
 
