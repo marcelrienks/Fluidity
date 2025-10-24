@@ -1,0 +1,28 @@
+{
+  "name": "fluidity",
+  "version": "1.0.0",
+  "description": "**Allowing http traffic to flow freely**",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/marcelrienks/Fluidity.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/marcelrienks/Fluidity/issues"
+  },
+  "homepage": "https://github.com/marcelrienks/Fluidity#readme",
+  "dependencies": {
+    "https-proxy-agent": "^7.0.6",
+    "ws": "^8.18.3"
+  }
+}
