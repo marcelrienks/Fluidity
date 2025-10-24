@@ -67,7 +67,34 @@ For technical architecture details, see the [Architecture Design](docs/architect
 
 ## Prerequisites
 
-Before building or running Fluidity, ensure you have the following installed:
+Before building or running Fluidity, ensure you have the following installed.
+
+### Automated Setup
+
+For your convenience, we provide automated setup scripts that will check for and install all prerequisites:
+
+- **Windows:** Run in PowerShell (as Administrator recommended):
+  ```powershell
+  .\scripts\setup-prerequisites.ps1
+  ```
+
+- **macOS:** Run in Terminal:
+  ```bash
+  chmod +x scripts/setup-prerequisites.sh
+  ./scripts/setup-prerequisites.sh
+  ```
+
+- **Linux:** Run in Terminal:
+  ```bash
+  chmod +x scripts/setup-prerequisites-linux.sh
+  ./scripts/setup-prerequisites-linux.sh
+  ```
+
+These scripts will automatically detect what's missing and install the required dependencies for your platform.
+
+### Manual Installation
+
+If you prefer to install prerequisites manually, or if the automated scripts don't work for your environment, here are the requirements:
 
 ### Go (>= 1.21)
 - **Windows:** Either download and run the installer from [go.dev](https://go.dev/dl/), or install via Chocolatey:
@@ -123,6 +150,36 @@ Before building or running Fluidity, ensure you have the following installed:
   ```bash
   sudo apt install openssl
   ```
+
+### Node.js (>= 18.x) - Required for WebSocket Testing
+- **Windows:** Either download and run the installer from [nodejs.org](https://nodejs.org/), or install via Chocolatey:
+  ```powershell
+  choco install nodejs
+  ```
+  After installation, verify:
+  ```powershell
+  node --version
+  npm --version
+  ```
+- **macOS:** Use Homebrew:
+  ```bash
+  brew install node
+  ```
+  or download from [nodejs.org](https://nodejs.org/).
+- **Linux:** Use your package manager (e.g., Ubuntu):
+  ```bash
+  curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+  sudo apt install -y nodejs
+  ```
+  or download from [nodejs.org](https://nodejs.org/).
+
+### npm Packages - Required for WebSocket Testing
+After installing Node.js, install the required packages globally:
+```bash
+npm install -g ws https-proxy-agent
+```
+
+These packages are required for the WebSocket test suites in both local and Docker test scripts.
 
 > **Note:** If you do not wish to use `make`, you can run the build commands manually as described in the Quick Start Guide.
 
