@@ -107,7 +107,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		"ca_file", cfg.CACertFile)
 
 	// Create tunnel server
-	tunnelServer, err := tunnel.NewServer(tlsConfig, cfg.GetListenAddress(), cfg.MaxConnections)
+	tunnelServer, err := tunnel.NewServer(tlsConfig, cfg.GetListenAddress(), cfg.MaxConnections, cfg.LogLevel)
 	if err != nil {
 		return fmt.Errorf("failed to create tunnel server: %w", err)
 	}

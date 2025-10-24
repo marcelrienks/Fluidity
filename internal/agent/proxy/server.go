@@ -16,24 +16,27 @@ import (
 
 // Server handles local HTTP proxy requests
 type Server struct {
-	server      *http.Server
-	tunnelConn  *tunnel.Client
-	logger      *logging.Logger
-	ctx         context.Context
-	cancel      context.CancelFunc
+	server     *http.Server
+	tunnelConn *tunnel.Client
+	logger     *logging.Logger
+	ctx        context.Context
+	cancel     context.CancelFunc
 }
 
 // NewServer creates a new proxy server
-func NewServer(port int, tunnelConn *tunnel.Client) *Server {
+func NewServer(port int, tunnelConn *tunnel.Client, logLevel string) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
+	logger := logging.NewLogger("proxy-server")
+	logger.SetLevel(logLevel)
+
 	proxy := &Server{
 		tunnelConn: tunnelConn,
-		logger:     logging.NewLogger("proxy-server"),
+		logger:     logger,
 		ctx:        ctx,
 		cancel:     cancel,
 	}
-	
+
 	proxy.server = &http.Server{
 		Addr:         fmt.Sprintf(":%d", port),
 		Handler:      proxy, // Use proxy as handler directly to handle CONNECT
@@ -41,25 +44,25 @@ func NewServer(port int, tunnelConn *tunnel.Client) *Server {
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
-	
+
 	return proxy
 }
 
 // Start begins serving HTTP proxy requests
 func (p *Server) Start() error {
 	p.logger.Info("Starting HTTP proxy server", "addr", p.server.Addr)
-	
+
 	listener, err := net.Listen("tcp", p.server.Addr)
 	if err != nil {
 		return fmt.Errorf("failed to start proxy server: %w", err)
 	}
-	
+
 	go func() {
 		if err := p.server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			p.logger.Error("Proxy server error", err)
 		}
 	}()
-	
+
 	p.logger.Info("HTTP proxy server started", "addr", p.server.Addr)
 	return nil
 }
@@ -73,10 +76,10 @@ func (p *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (p *Server) Stop() error {
 	p.logger.Info("Stopping HTTP proxy server")
 	p.cancel()
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	
+
 	return p.server.Shutdown(ctx)
 }
 
@@ -84,13 +87,13 @@ func (p *Server) Stop() error {
 func (p *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 	// Log the request (domain only for privacy)
 	p.logRequest(r)
-	
+
 	// Handle CONNECT method for HTTPS tunneling
 	if r.Method == "CONNECT" {
 		p.handleConnect(w, r)
 		return
 	}
-	
+
 	// Handle regular HTTP requests
 	p.handleHTTPRequest(w, r)
 }
@@ -99,7 +102,7 @@ func (p *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 func (p *Server) handleHTTPRequest(w http.ResponseWriter, r *http.Request) {
 	// Generate request ID
 	reqID := p.generateRequestID()
-	
+
 	// Ensure URL is absolute
 	if !r.URL.IsAbs() {
 		scheme := "http"
@@ -109,7 +112,7 @@ func (p *Server) handleHTTPRequest(w http.ResponseWriter, r *http.Request) {
 		r.URL.Scheme = scheme
 		r.URL.Host = r.Host
 	}
-	
+
 	// Read request body
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -118,7 +121,7 @@ func (p *Server) handleHTTPRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Body.Close()
-	
+
 	// Convert HTTP request to tunnel protocol
 	tunnelReq := &protocol.Request{
 		ID:      reqID,
@@ -127,7 +130,7 @@ func (p *Server) handleHTTPRequest(w http.ResponseWriter, r *http.Request) {
 		Headers: convertHeaders(r.Header),
 		Body:    body,
 	}
-	
+
 	// Send through tunnel and get response
 	resp, err := p.tunnelConn.SendRequest(tunnelReq)
 	if err != nil {
@@ -135,7 +138,7 @@ func (p *Server) handleHTTPRequest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Tunnel error", http.StatusBadGateway)
 		return
 	}
-	
+
 	// Write response back to client
 	p.writeResponse(w, resp)
 }
@@ -144,6 +147,8 @@ func (p *Server) handleHTTPRequest(w http.ResponseWriter, r *http.Request) {
 func (p *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	// Establish a TCP tunnel via the server using our protocol
 	reqID := p.generateRequestID()
+
+	p.logger.Debug("CONNECT starting", "id", reqID, "host", r.Host)
 
 	// Ask tunnel to open remote connection
 	ack, err := p.tunnelConn.ConnectOpen(reqID, r.Host)
@@ -155,6 +160,8 @@ func (p *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Tunnel CONNECT failed", http.StatusBadGateway)
 		return
 	}
+
+	p.logger.Debug("CONNECT opened successfully", "id", reqID)
 
 	// Hijack client connection to get raw TCP
 	hj, ok := w.(http.Hijacker)
@@ -168,41 +175,56 @@ func (p *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	p.logger.Debug("CONNECT hijacked connection", "id", reqID)
+
 	// Send 200 Connection established
 	_, _ = clientBuf.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n")
 	_ = clientBuf.Flush()
 
+	p.logger.Debug("CONNECT sent 200 to client", "id", reqID)
+
 	// Start pump: client->server
 	go func() {
 		defer func() {
+			p.logger.Debug("CONNECT client->server pump exiting", "id", reqID)
 			_ = p.tunnelConn.ConnectClose(reqID, "")
 			clientConn.Close()
 		}()
+		p.logger.Debug("CONNECT client->server pump started", "id", reqID)
 		buf := make([]byte, 32*1024)
 		for {
 			n, err := clientConn.Read(buf)
 			if n > 0 {
+				p.logger.Debug("CONNECT read from client", "id", reqID, "bytes", n)
 				if sendErr := p.tunnelConn.ConnectSend(reqID, buf[:n]); sendErr != nil {
 					p.logger.Error("CONNECT send error", sendErr, "id", reqID)
 					return
 				}
+				p.logger.Debug("CONNECT sent to server", "id", reqID, "bytes", n)
 			}
 			if err != nil {
+				if err != io.EOF {
+					p.logger.Debug("CONNECT client read error", "id", reqID, "error", err)
+				}
 				return
 			}
 		}
 	}()
 
 	// Pump: server->client (main goroutine)
+	p.logger.Debug("CONNECT server->client pump starting", "id", reqID)
 	ch := p.tunnelConn.ConnectDataChannel(reqID)
 	for msg := range ch {
 		if msg.Chunk != nil && len(msg.Chunk) > 0 {
+			p.logger.Debug("CONNECT received from server", "id", reqID, "bytes", len(msg.Chunk))
 			if _, err := clientConn.Write(msg.Chunk); err != nil {
 				p.logger.Error("CONNECT write to client failed", err, "id", reqID)
 				return
 			}
+			p.logger.Debug("CONNECT wrote to client", "id", reqID, "bytes", len(msg.Chunk))
 		}
 	}
+	p.logger.Debug("CONNECT server->client pump exiting", "id", reqID)
 }
 
 // writeResponse writes the tunnel response back to the HTTP client
@@ -213,10 +235,10 @@ func (p *Server) writeResponse(w http.ResponseWriter, resp *protocol.Response) {
 			w.Header().Add(name, value)
 		}
 	}
-	
+
 	// Set status code
 	w.WriteHeader(resp.StatusCode)
-	
+
 	// Write body
 	if len(resp.Body) > 0 {
 		w.Write(resp.Body)
@@ -247,11 +269,11 @@ func (p *Server) logRequest(r *http.Request) {
 	} else {
 		domain = r.Host
 	}
-	
+
 	// Remove port from domain for cleaner logging
 	if host, _, err := net.SplitHostPort(domain); err == nil {
 		domain = host
 	}
-	
+
 	p.logger.Info("Proxying request", "method", r.Method, "domain", domain)
 }

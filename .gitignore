@@ -16,4 +16,11 @@ certs/
 *.srl
 
 # Build outputs
+bin/
 build/
+
+# Logs
+logs/
+*.log
+*.out
+*.err

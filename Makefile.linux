@@ -57,18 +57,8 @@ fmt:
 
 docker-build-agent:
 	@echo "Building agent Docker image..."
-	docker build -t fluidity-agent -f deployments/agent/Dockerfile . || \
-	(
-		echo "Falling back to scratch image build (requires prebuilt Linux binary)" && \
-		GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GOBUILD) -o $(BUILD_DIR)/fluidity-agent ./$(AGENT_DIR) && \
-		docker build -t fluidity-agent -f deployments/agent/Dockerfile.scratch .
-	)
+	docker build -t fluidity-agent -f deployments/agent/Dockerfile .
 
 docker-build-server:
 	@echo "Building server Docker image..."
-	docker build -t fluidity-server -f deployments/server/Dockerfile . || \
-	(
-		echo "Falling back to scratch image build (requires prebuilt Linux binary)" && \
-		GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GOBUILD) -o $(BUILD_DIR)/fluidity-server ./$(SERVER_DIR) && \
-		docker build -t fluidity-server -f deployments/server/Dockerfile.scratch .
-	)
+	docker build -t fluidity-server -f deployments/server/Dockerfile .

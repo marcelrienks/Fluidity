@@ -743,8 +743,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o fluidity-agent ./cmd/agent
 
-FROM alpine:latest
-RUN apk --no-cache add ca-certificates
+FROM alpine/curl:latest
 WORKDIR /root/
 
 COPY --from=builder /app/fluidity-agent .
@@ -767,8 +766,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o fluidity-server ./cmd/server
 
-FROM alpine:latest
-RUN apk --no-cache add ca-certificates
+FROM alpine/curl:latest
 WORKDIR /root/
 
 COPY --from=builder /app/fluidity-server .

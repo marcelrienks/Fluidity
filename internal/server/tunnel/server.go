@@ -34,7 +34,7 @@ type Server struct {
 }
 
 // NewServer creates a new tunnel server
-func NewServer(tlsConfig *tls.Config, addr string, maxConns int) (*Server, error) {
+func NewServer(tlsConfig *tls.Config, addr string, maxConns int, logLevel string) (*Server, error) {
 	listener, err := tls.Listen("tcp", addr, tlsConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create listener: %w", err)
@@ -53,10 +53,13 @@ func NewServer(tlsConfig *tls.Config, addr string, maxConns int) (*Server, error
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	logger := logging.NewLogger("tunnel-server")
+	logger.SetLevel(logLevel)
+
 	return &Server{
 		listener:   listener,
 		httpClient: httpClient,
-		logger:     logging.NewLogger("tunnel-server"),
+		logger:     logger,
 		ctx:        ctx,
 		cancel:     cancel,
 		maxConns:   maxConns,
@@ -161,6 +164,9 @@ func (s *Server) handleConnection(conn *tls.Conn) {
 
 	decoder := json.NewDecoder(conn)
 	encoder := json.NewEncoder(conn)
+	
+	// Mutex to protect concurrent writes to encoder
+	var encoderMutex sync.Mutex
 
 	for {
 		select {
@@ -187,7 +193,7 @@ func (s *Server) handleConnection(conn *tls.Conn) {
 				continue
 			}
 			// Process request in a goroutine to handle concurrent requests
-			go s.processRequest(&req, encoder)
+			go s.processRequest(&req, encoder, &encoderMutex)
 
 		case "connect_open":
 			m, _ := env.Payload.(map[string]any)
@@ -197,7 +203,7 @@ func (s *Server) handleConnection(conn *tls.Conn) {
 				s.logger.Error("Failed to parse connect_open", err)
 				continue
 			}
-			go s.handleConnectOpen(&open, encoder)
+			go s.handleConnectOpen(&open, encoder, &encoderMutex)
 
 		case "connect_data":
 			m, _ := env.Payload.(map[string]any)
@@ -227,13 +233,13 @@ func (s *Server) handleConnection(conn *tls.Conn) {
 }
 
 // processRequest handles a single HTTP request
-func (s *Server) processRequest(req *protocol.Request, encoder *json.Encoder) {
+func (s *Server) processRequest(req *protocol.Request, encoder *json.Encoder, mu *sync.Mutex) {
 	s.logger.Debug("Processing request", "id", req.ID, "method", req.Method, "url", req.URL)
 
 	// Create HTTP request
 	httpReq, err := http.NewRequestWithContext(s.ctx, req.Method, req.URL, bytes.NewReader(req.Body))
 	if err != nil {
-		s.sendErrorResponse(req.ID, err, encoder)
+		s.sendErrorResponse(req.ID, err, encoder, mu)
 		return
 	}
 
@@ -250,7 +256,7 @@ func (s *Server) processRequest(req *protocol.Request, encoder *json.Encoder) {
 	// Make request
 	httpResp, err := s.httpClient.Do(httpReq)
 	if err != nil {
-		s.sendErrorResponse(req.ID, err, encoder)
+		s.sendErrorResponse(req.ID, err, encoder, mu)
 		return
 	}
 	defer httpResp.Body.Close()
@@ -258,7 +264,7 @@ func (s *Server) processRequest(req *protocol.Request, encoder *json.Encoder) {
 	// Read response body
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		s.sendErrorResponse(req.ID, err, encoder)
+		s.sendErrorResponse(req.ID, err, encoder, mu)
 		return
 	}
 
@@ -271,15 +277,18 @@ func (s *Server) processRequest(req *protocol.Request, encoder *json.Encoder) {
 	}
 
 	env := protocol.Envelope{Type: "http_response", Payload: resp}
-	if err := encoder.Encode(env); err != nil {
-		s.logger.Error("Failed to send response", err, "id", req.ID)
+	mu.Lock()
+	encodeErr := encoder.Encode(env)
+	mu.Unlock()
+	if encodeErr != nil {
+		s.logger.Error("Failed to send response", encodeErr, "id", req.ID)
 	}
 
 	s.logger.Debug("Response sent", "id", req.ID, "status", httpResp.StatusCode, "size", len(body))
 }
 
 // sendErrorResponse sends an error response back to the client
-func (s *Server) sendErrorResponse(reqID string, err error, encoder *json.Encoder) {
+func (s *Server) sendErrorResponse(reqID string, err error, encoder *json.Encoder, mu *sync.Mutex) {
 	s.logger.Error("Request processing failed", err, "id", reqID)
 
 	resp := &protocol.Response{
@@ -291,7 +300,10 @@ func (s *Server) sendErrorResponse(reqID string, err error, encoder *json.Encode
 	}
 
 	env := protocol.Envelope{Type: "http_response", Payload: resp}
-	if encodeErr := encoder.Encode(env); encodeErr != nil {
+	mu.Lock()
+	encodeErr := encoder.Encode(env)
+	mu.Unlock()
+	if encodeErr != nil {
 		s.logger.Error("Failed to send error response", encodeErr, "id", reqID)
 	}
 }
@@ -327,7 +339,7 @@ func parseURL(rawURL string) (*url.URL, error) {
 }
 
 // handleConnectOpen opens a TCP connection to the target address
-func (s *Server) handleConnectOpen(open *protocol.ConnectOpen, encoder *json.Encoder) {
+func (s *Server) handleConnectOpen(open *protocol.ConnectOpen, encoder *json.Encoder, mu *sync.Mutex) {
 	s.logger.Info("CONNECT open request", "id", open.ID, "address", open.Address)
 
 	// Dial target
@@ -336,9 +348,13 @@ func (s *Server) handleConnectOpen(open *protocol.ConnectOpen, encoder *json.Enc
 		s.logger.Error("CONNECT dial failed", err, "id", open.ID, "address", open.Address)
 		// Send error via connect_close
 		env := protocol.Envelope{Type: "connect_close", Payload: &protocol.ConnectClose{ID: open.ID, Error: err.Error()}}
+		mu.Lock()
 		_ = encoder.Encode(env)
+		mu.Unlock()
 		return
 	}
+
+	s.logger.Debug("CONNECT dial successful", "id", open.ID, "address", open.Address)
 
 	// Store connection
 	s.tcpMutex.Lock()
@@ -347,31 +363,50 @@ func (s *Server) handleConnectOpen(open *protocol.ConnectOpen, encoder *json.Enc
 
 	// Send ack
 	env := protocol.Envelope{Type: "connect_ack", Payload: &protocol.ConnectAck{ID: open.ID, Ok: true}}
-	_ = encoder.Encode(env)
+	mu.Lock()
+	encErr := encoder.Encode(env)
+	mu.Unlock()
+	if encErr != nil {
+		s.logger.Error("Failed to send connect_ack", encErr, "id", open.ID)
+		return
+	}
+	s.logger.Debug("Sent connect_ack", "id", open.ID)
 
 	// Start reader goroutine: read from target and send to agent
 	go func() {
 		defer func() {
+			s.logger.Debug("CONNECT reader goroutine exiting", "id", open.ID)
 			s.tcpMutex.Lock()
 			delete(s.tcpConns, open.ID)
 			s.tcpMutex.Unlock()
 			targetConn.Close()
 			// Send close
 			closeEnv := protocol.Envelope{Type: "connect_close", Payload: &protocol.ConnectClose{ID: open.ID}}
+			mu.Lock()
 			_ = encoder.Encode(closeEnv)
+			mu.Unlock()
 		}()
 
+		s.logger.Debug("CONNECT reader goroutine started", "id", open.ID)
 		buf := make([]byte, 32*1024)
 		for {
 			n, err := targetConn.Read(buf)
 			if n > 0 {
+				s.logger.Debug("CONNECT read data from target", "id", open.ID, "bytes", n)
 				dataEnv := protocol.Envelope{Type: "connect_data", Payload: &protocol.ConnectData{ID: open.ID, Chunk: buf[:n]}}
-				if encErr := encoder.Encode(dataEnv); encErr != nil {
+				mu.Lock()
+				encErr := encoder.Encode(dataEnv)
+				mu.Unlock()
+				if encErr != nil {
 					s.logger.Error("Failed to send connect_data", encErr, "id", open.ID)
 					return
 				}
+				s.logger.Debug("CONNECT sent data to agent", "id", open.ID, "bytes", n)
 			}
 			if err != nil {
+				if err != io.EOF {
+					s.logger.Debug("CONNECT read error from target", "id", open.ID, "error", err)
+				}
 				return
 			}
 		}
@@ -385,12 +420,16 @@ func (s *Server) handleConnectData(data *protocol.ConnectData) {
 	s.tcpMutex.RUnlock()
 
 	if targetConn == nil {
+		s.logger.Debug("CONNECT data received for unknown connection", "id", data.ID)
 		return
 	}
 
+	s.logger.Debug("CONNECT writing data to target", "id", data.ID, "bytes", len(data.Chunk))
 	if _, err := targetConn.Write(data.Chunk); err != nil {
 		s.logger.Error("Failed to write to target conn", err, "id", data.ID)
 		s.handleConnectClose(&protocol.ConnectClose{ID: data.ID})
+	} else {
+		s.logger.Debug("CONNECT wrote data to target", "id", data.ID, "bytes", len(data.Chunk))
 	}
 }
 
