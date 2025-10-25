@@ -127,24 +127,54 @@ else
 fi
 echo ""
 
-# 6. Check/Install Node.js and npm packages
-echo -e "${YELLOW}[6/6] Checking Node.js (18+) and npm packages...${NC}"
+# 6. Check/Install Node.js, npm, and npm packages
+echo -e "${YELLOW}[6/6] Checking Node.js (18+), npm, and npm packages...${NC}"
+NODE_INSTALLED=false
+NPM_INSTALLED=false
 if command_exists node; then
+    NODE_INSTALLED=true
     NODE_VERSION=$(node --version)
     echo -e "${GREEN}  ✓ Node.js is installed: $NODE_VERSION${NC}"
-    
-    # Check npm packages
+else
+    echo -e "${RED}  ✗ Node.js is not installed${NC}"
+fi
+if command_exists npm; then
+    NPM_INSTALLED=true
+    NPM_VERSION=$(npm --version)
+    echo -e "${GREEN}  ✓ npm is installed: $NPM_VERSION${NC}"
+else
+    echo -e "${RED}  ✗ npm is not installed${NC}"
+fi
+
+if [ "$NODE_INSTALLED" = false ] || [ "$NPM_INSTALLED" = false ]; then
+    echo -e "${YELLOW}  Installing Node.js and npm via Homebrew...${NC}"
+    if brew install node; then
+        if command_exists node; then
+            NODE_INSTALLED=true
+            NODE_VERSION=$(node --version)
+            echo -e "${GREEN}  ✓ Node.js installed successfully: $NODE_VERSION${NC}"
+        fi
+        if command_exists npm; then
+            NPM_INSTALLED=true
+            NPM_VERSION=$(npm --version)
+            echo -e "${GREEN}  ✓ npm installed successfully: $NPM_VERSION${NC}"
+        fi
+    else
+        echo -e "${RED}  ✗ Node.js/npm installation failed. Please install manually from https://nodejs.org/${NC}"
+        HAS_ERRORS=true
+    fi
+fi
+
+if [ "$NODE_INSTALLED" = true ] && [ "$NPM_INSTALLED" = true ]; then
     echo -e "${YELLOW}  Checking npm packages (ws, https-proxy-agent)...${NC}"
     WS_INSTALLED=false
     PROXY_INSTALLED=false
-    
     if npm list -g ws 2>/dev/null | grep -q "ws@"; then
         WS_INSTALLED=true
     fi
     if npm list -g https-proxy-agent 2>/dev/null | grep -q "https-proxy-agent@"; then
         PROXY_INSTALLED=true
     fi
-    
     if [ "$WS_INSTALLED" = false ] || [ "$PROXY_INSTALLED" = false ]; then
         echo -e "${YELLOW}  Installing required npm packages...${NC}"
         if npm install -g ws https-proxy-agent; then
@@ -155,24 +185,6 @@ if command_exists node; then
         fi
     else
         echo -e "${GREEN}  ✓ Required npm packages are installed${NC}"
-    fi
-else
-    echo -e "${RED}  ✗ Node.js is not installed${NC}"
-    echo -e "${YELLOW}  Installing Node.js via Homebrew...${NC}"
-    if brew install node; then
-        echo -e "${GREEN}  ✓ Node.js installed successfully${NC}"
-        
-        # Install npm packages
-        echo -e "${YELLOW}  Installing required npm packages...${NC}"
-        if npm install -g ws https-proxy-agent; then
-            echo -e "${GREEN}  ✓ npm packages installed successfully${NC}"
-        else
-            echo -e "${RED}  ✗ Error installing npm packages${NC}"
-            HAS_ERRORS=true
-        fi
-    else
-        echo -e "${RED}  ✗ Node.js installation failed. Please install manually from https://nodejs.org/${NC}"
-        HAS_ERRORS=true
     fi
 fi
 echo ""

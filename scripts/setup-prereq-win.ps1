@@ -183,109 +183,86 @@ else {
 Write-Host ""
 
 # 6. Check/Install Node.js and npm packages
-Write-Host "[6/6] Checking Node.js (v18+) and npm packages..." -ForegroundColor Yellow
+Write-Host "[6/6] Checking Node.js (v18+), npm, and npm packages..." -ForegroundColor Yellow
+$nodeInstalled = $false
+$npmInstalled = $false
 if (Test-Command "node") {
     $nodeVersion = (node --version)
     Write-Host "  [OK] Node.js is installed: $nodeVersion" -ForegroundColor Green
-    
+    $nodeInstalled = $true
+} else {
+    Write-Host "  [MISSING] Node.js is not installed" -ForegroundColor Red
+}
+if (Test-Command "npm") {
+    $npmVersion = (npm --version)
+    Write-Host "  [OK] npm is installed: $npmVersion" -ForegroundColor Green
+    $npmInstalled = $true
+} else {
+    Write-Host "  [MISSING] npm is not installed" -ForegroundColor Red
+}
+
+if (-not $nodeInstalled -or -not $npmInstalled) {
+    Write-Host "  Installing Node.js and npm via Chocolatey..." -ForegroundColor Yellow
+    try {
+        choco install nodejs -y
+        # Refresh environment variables
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+        if (Test-Command "node") {
+            $nodeVersion = (node --version)
+            Write-Host "  [OK] Node.js installed successfully: $nodeVersion" -ForegroundColor Green
+            $nodeInstalled = $true
+        }
+        if (Test-Command "npm") {
+            $npmVersion = (npm --version)
+            Write-Host "  [OK] npm installed successfully: $npmVersion" -ForegroundColor Green
+            $npmInstalled = $true
+        }
+    } catch {
+        Write-Host "  [FAIL] Error installing Node.js/npm: $_" -ForegroundColor Red
+        $hasErrors = $true
+    }
+}
+
+if ($nodeInstalled -and $npmInstalled) {
     # Check npm packages
     Write-Host "  Checking npm packages (ws, https-proxy-agent)..." -ForegroundColor Yellow
     $wsInstalled = $false
     $proxyInstalled = $false
-    
     try {
         $npmList = npm list -g --depth=0 2>$null
         $wsInstalled = $npmList -match "ws@"
         $proxyInstalled = $npmList -match "https-proxy-agent@"
-    }
-    catch {
+    } catch {
         # Ignore errors, will check individually
     }
-    
     if (-not $wsInstalled -or -not $proxyInstalled) {
         Write-Host "  Installing required npm packages..." -ForegroundColor Yellow
-        
         # First try with default SSL settings
         $installResult = npm install -g ws https-proxy-agent 2>&1
-        
         # Check if installation failed due to SSL certificate issues
         if ($LASTEXITCODE -ne 0 -and $installResult -match "SELF_SIGNED_CERT_IN_CHAIN|CERT_|SSL_") {
             Write-Host "  [WARNING] SSL certificate error detected (likely corporate proxy)" -ForegroundColor Yellow
             Write-Host "  Retrying with SSL verification disabled..." -ForegroundColor Yellow
-            
             try {
                 npm install -g ws https-proxy-agent --strict-ssl=false
                 if ($LASTEXITCODE -eq 0) {
                     Write-Host "  [OK] npm packages installed successfully (with SSL disabled)" -ForegroundColor Green
-                }
-                else {
+                } else {
                     Write-Host "  [FAIL] Error installing npm packages" -ForegroundColor Red
                     $hasErrors = $true
                 }
-            }
-            catch {
+            } catch {
                 Write-Host "  [FAIL] Error installing npm packages: $_" -ForegroundColor Red
                 $hasErrors = $true
             }
-        }
-        elseif ($LASTEXITCODE -ne 0) {
+        } elseif ($LASTEXITCODE -ne 0) {
             Write-Host "  [FAIL] Error installing npm packages" -ForegroundColor Red
             $hasErrors = $true
-        }
-        else {
+        } else {
             Write-Host "  [OK] npm packages installed successfully" -ForegroundColor Green
         }
-    }
-    else {
+    } else {
         Write-Host "  [OK] Required npm packages are installed" -ForegroundColor Green
-    }
-}
-else {
-    Write-Host "  [MISSING] Node.js is not installed" -ForegroundColor Red
-    Write-Host "  Installing Node.js via Chocolatey..." -ForegroundColor Yellow
-    try {
-        choco install nodejs -y
-        
-        # Refresh environment variables
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
-        
-        if (Test-Command "node") {
-            Write-Host "  [OK] Node.js installed successfully" -ForegroundColor Green
-            
-            # Install npm packages
-            Write-Host "  Installing required npm packages..." -ForegroundColor Yellow
-            
-            # First try with default SSL settings
-            $installResult = npm install -g ws https-proxy-agent 2>&1
-            
-            # Check if installation failed due to SSL certificate issues
-            if ($LASTEXITCODE -ne 0 -and $installResult -match "SELF_SIGNED_CERT_IN_CHAIN|CERT_|SSL_") {
-                Write-Host "  [WARNING] SSL certificate error detected (likely corporate proxy)" -ForegroundColor Yellow
-                Write-Host "  Retrying with SSL verification disabled..." -ForegroundColor Yellow
-                npm install -g ws https-proxy-agent --strict-ssl=false
-                
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Host "  [OK] npm packages installed successfully (with SSL disabled)" -ForegroundColor Green
-                }
-                else {
-                    Write-Host "  [FAIL] Error installing npm packages" -ForegroundColor Red
-                }
-            }
-            elseif ($LASTEXITCODE -eq 0) {
-                Write-Host "  [OK] npm packages installed successfully" -ForegroundColor Green
-            }
-            else {
-                Write-Host "  [FAIL] Error installing npm packages" -ForegroundColor Red
-            }
-        }
-        else {
-            Write-Host "  [FAIL] Node.js installation failed. Please install manually from https://nodejs.org/" -ForegroundColor Red
-            $hasErrors = $true
-        }
-    }
-    catch {
-        Write-Host "  [FAIL] Error installing Node.js: $_" -ForegroundColor Red
-        $hasErrors = $true
     }
 }
 Write-Host ""
