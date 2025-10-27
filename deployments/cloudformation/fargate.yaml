@@ -1,0 +1,162 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Fluidity - AWS Fargate (ECS) deployment for tunnel server
+
+Parameters:
+  ClusterName:
+    Type: String
+    Default: fluidity
+    Description: ECS Cluster name
+  ServiceName:
+    Type: String
+    Default: fluidity-server
+    Description: ECS Service name
+  ContainerImage:
+    Type: String
+    Description: Full image URI, e.g. <ACCOUNT>.dkr.ecr.<REGION>.amazonaws.com/fluidity-server:latest
+  ContainerPort:
+    Type: Number
+    Default: 8443
+    Description: Container port to expose (TCP)
+  Cpu:
+    Type: String
+    Default: '256'
+    AllowedValues: ['256','512','1024','2048','4096']
+    Description: Task CPU units (256 = 0.25 vCPU)
+  Memory:
+    Type: String
+    Default: '512'
+    AllowedValues: ['512','1024','2048','3072','4096','5120','6144','7168','8192','16384','30720']
+    Description: Task memory (MiB)
+  DesiredCount:
+    Type: Number
+    Default: 0
+    MinValue: 0
+    Description: Number of running tasks (set to 1 to start)
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC where tasks will run (use default VPC id or your own)
+  PublicSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: One or more public subnet IDs (AssignPublicIp must be enabled)
+  AllowedIngressCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: CIDR allowed to connect to port (use your public IP/32 for security)
+  AssignPublicIp:
+    Type: String
+    Default: ENABLED
+    AllowedValues: [ENABLED, DISABLED]
+    Description: Assign a public IP to tasks
+  LogGroupName:
+    Type: String
+    Default: /fluidity/server
+    Description: CloudWatch Logs group name
+  LogRetentionDays:
+    Type: Number
+    Default: 14
+    Description: Log retention in days
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Ref LogGroupName
+      RetentionInDays: !Ref LogRetentionDays
+
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ClusterName}-${ServiceName}-exec'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Path: '/'
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Fluidity server security group
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref ContainerPort
+          ToPort: !Ref ContainerPort
+          CidrIp: !Ref AllowedIngressCidr
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref ClusterName
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref ServiceName
+      Cpu: !Ref Cpu
+      Memory: !Ref Memory
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: server
+          Image: !Ref ContainerImage
+          Essential: true
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroupName
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          Environment:
+            - Name: FLUIDITY_LOG_LEVEL
+              Value: info
+
+  Service:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref Cluster
+      ServiceName: !Ref ServiceName
+      LaunchType: FARGATE
+      DesiredCount: !Ref DesiredCount
+      TaskDefinition: !Ref TaskDefinition
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Ref PublicSubnets
+          SecurityGroups: [!Ref SecurityGroup]
+          AssignPublicIp: !Ref AssignPublicIp
+
+Outputs:
+  ClusterArn:
+    Description: ECS Cluster ARN
+    Value: !Ref Cluster
+    Export:
+      Name: !Sub '${AWS::StackName}-ClusterArn'
+  ServiceNameOut:
+    Description: Service name
+    Value: !Ref Service
+    Export:
+      Name: !Sub '${AWS::StackName}-ServiceName'
+  TaskDefinitionArn:
+    Description: Task definition ARN
+    Value: !Ref TaskDefinition
+    Export:
+      Name: !Sub '${AWS::StackName}-TaskDefinitionArn'
+  SecurityGroupId:
+    Description: Security group ID for the service
+    Value: !Ref SecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-SecurityGroupId'
+  LogGroupOut:
+    Description: CloudWatch Log Group name
+    Value: !Ref LogGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-LogGroupName'

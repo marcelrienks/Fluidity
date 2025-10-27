@@ -38,6 +38,14 @@ Both components use mutual TLS (mTLS) for authentication and run in Docker conta
 
 For detailed requirements and roadmap, see [docs/PRD.md](docs/PRD.md) and [docs/plan.md](docs/plan.md).
 
+## Deployment
+
+- Deployment Guide: See [docs/deployment.md](docs/deployment.md) for all options (local binaries, Docker, and AWS Fargate).
+- AWS Fargate (recommended for cloud/on-demand):
+  - End-to-end plan: [docs/fargate.md](docs/fargate.md)
+  - One-click infra (CloudFormation): [deployments/cloudformation/fargate.yaml](deployments/cloudformation/fargate.yaml)
+  - Start/Stop on demand by setting DesiredCount (1 to start, 0 to stop); fetch the task public IP with the start script in the Fargate doc and pass it to the Agent via `--server-ip`.
+
 ## Prerequisites
 
 ### Required
@@ -286,6 +294,8 @@ make -f Makefile.linux docker-build-agent
 - **[Product Requirements](docs/PRD.md)** - Full feature requirements and specifications
 - **[Project Plan](docs/plan.md)** - Development roadmap and milestones
 - **[Testing Guide](docs/testing.md)** - Comprehensive testing documentation
+- **[Fargate Deployment](docs/fargate.md)** - AWS Fargate deployment plan and on-demand operations
+- **[Deployment Guide](docs/deployment.md)** - All deployment options (local, Docker, Fargate, CloudFormation)
 
 ## Disclaimer
 
