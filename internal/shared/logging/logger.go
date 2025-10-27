@@ -20,34 +20,34 @@ type OrderedJSONFormatter struct {
 	TimestampFormat string
 }
 
-// Format renders a single log entry with consistent field order
+// Format renders a single log entry with consistent field order and short keys
 func (f *OrderedJSONFormatter) Format(entry *logrus.Entry) ([]byte, error) {
-	// Fixed order: timestamp, level, component, message, then custom fields
+	// Fixed order: time, level, component, message, then custom fields (using single-letter keys)
 	var buf bytes.Buffer
 	buf.WriteString("{")
 
-	// 1. Timestamp
+	// 1. Timestamp (t)
 	timestampFormat := f.TimestampFormat
 	if timestampFormat == "" {
 		timestampFormat = "2006-01-02T15:04:05.000Z"
 	}
-	fmt.Fprintf(&buf, `"timestamp":"%s",`, entry.Time.Format(timestampFormat))
+	fmt.Fprintf(&buf, `"t":"%s",`, entry.Time.Format(timestampFormat))
 
-	// 2. Level
-	fmt.Fprintf(&buf, `"level":"%s",`, entry.Level.String())
+	// 2. Level (l)
+	fmt.Fprintf(&buf, `"l":"%s",`, entry.Level.String())
 
-	// 3. Component (if present)
+	// 3. Component (c) - if present
 	if component, ok := entry.Data["component"]; ok {
 		componentJSON, _ := json.Marshal(component)
-		fmt.Fprintf(&buf, `"component":%s,`, componentJSON)
+		fmt.Fprintf(&buf, `"c":%s,`, componentJSON)
 		delete(entry.Data, "component") // Remove so we don't duplicate later
 	}
 
-	// 4. Message
+	// 4. Message (m)
 	messageJSON, _ := json.Marshal(entry.Message)
-	fmt.Fprintf(&buf, `"message":%s`, messageJSON)
+	fmt.Fprintf(&buf, `"m":%s`, messageJSON)
 
-	// 5. Error (if present from logrus.WithError, it's in Data with key "error")
+	// 5. Error (e) - if present from logrus.WithError, it's in Data with key "error"
 	if err, ok := entry.Data[logrus.ErrorKey]; ok {
 		// Handle error specially to ensure it's a string
 		var errStr string
@@ -57,7 +57,7 @@ func (f *OrderedJSONFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 			errStr = fmt.Sprintf("%v", err)
 		}
 		errJSON, _ := json.Marshal(errStr)
-		fmt.Fprintf(&buf, `,"error":%s`, errJSON)
+		fmt.Fprintf(&buf, `,"e":%s`, errJSON)
 		delete(entry.Data, logrus.ErrorKey)
 	} // 6. All other custom fields in sorted order for consistency
 	if len(entry.Data) > 0 {

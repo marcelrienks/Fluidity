@@ -1,0 +1,54 @@
+[
+  {
+    "ParameterKey": "ClusterName",
+    "ParameterValue": "fluidity"
+  },
+  {
+    "ParameterKey": "ServiceName",
+    "ParameterValue": "fluidity-server"
+  },
+  {
+    "ParameterKey": "ContainerImage",
+    "ParameterValue": "123456789012.dkr.ecr.us-east-1.amazonaws.com/fluidity-server:latest"
+  },
+  {
+    "ParameterKey": "ContainerPort",
+    "ParameterValue": "8443"
+  },
+  {
+    "ParameterKey": "Cpu",
+    "ParameterValue": "256"
+  },
+  {
+    "ParameterKey": "Memory",
+    "ParameterValue": "512"
+  },
+  {
+    "ParameterKey": "DesiredCount",
+    "ParameterValue": "0"
+  },
+  {
+    "ParameterKey": "VpcId",
+    "ParameterValue": "vpc-0123456789abcdef0"
+  },
+  {
+    "ParameterKey": "PublicSubnets",
+    "ParameterValue": "subnet-0123456789abcdef0,subnet-0123456789abcdef1"
+  },
+  {
+    "ParameterKey": "AllowedIngressCidr",
+    "ParameterValue": "0.0.0.0/0"
+  },
+  {
+    "ParameterKey": "AssignPublicIp",
+    "ParameterValue": "ENABLED"
+  },
+  {
+    "ParameterKey": "LogGroupName",
+    "ParameterValue": "/ecs/fluidity/server"
+  },
+  {
+    "ParameterKey": "LogRetentionDays",
+    "ParameterValue": "14"
+  }
+]

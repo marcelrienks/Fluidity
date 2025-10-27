@@ -1,38 +1,19 @@
 # Server Dockerfile
-FROM golang:1.21-alpine AS builder
-
-# Set working directory
-WORKDIR /app
-
-# Install git and ca-certificates
-RUN apk add --no-cache git ca-certificates
-
-# Copy go mod files
-COPY go.mod go.sum ./
-
-# Download dependencies
-RUN go mod download
-
-# Copy source code
-COPY . .
-
-# Build the server
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o fluidity-server ./cmd/server
-
-# Final stage - use alpine/curl for ca-certificates and debugging tools
+# Build binary locally on host, then copy into Alpine container
+# This avoids corporate firewall issues with Go module downloads
 FROM alpine/curl:latest
 
 # Create app directory
 WORKDIR /root/
 
-# Copy binary from builder stage
-COPY --from=builder /app/fluidity-server .
+# Copy pre-built binary from build directory (built on host)
+COPY build/fluidity-server .
 
-# Copy configuration files
+# Create config and certs directories (files will be mounted at runtime)
+RUN mkdir -p ./config ./certs
+
+# Copy default configuration files (can be overridden with volume mounts)
 COPY configs/server.yaml ./config/server.yaml
-
-# Create certs directory (certificates will be mounted or copied)
-RUN mkdir -p ./certs
 
 # Expose server port
 EXPOSE 8443
