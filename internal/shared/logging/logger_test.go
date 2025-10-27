@@ -70,19 +70,19 @@ func TestOrderedJSONFormatterBasic(t *testing.T) {
 		t.Fatalf("Failed to parse JSON output: %v", err)
 	}
 
-	// Verify fields
-	if logEntry["level"] != "info" {
-		t.Errorf("Expected level 'info', got '%v'", logEntry["level"])
+	// Verify fields (using short keys: t, l, c, m)
+	if logEntry["l"] != "info" {
+		t.Errorf("Expected level 'info', got '%v'", logEntry["l"])
 	}
-	if logEntry["message"] != "Test message" {
-		t.Errorf("Expected message 'Test message', got '%v'", logEntry["message"])
+	if logEntry["m"] != "Test message" {
+		t.Errorf("Expected message 'Test message', got '%v'", logEntry["m"])
 	}
-	if logEntry["component"] != "test" {
-		t.Errorf("Expected component 'test', got '%v'", logEntry["component"])
+	if logEntry["c"] != "test" {
+		t.Errorf("Expected component 'test', got '%v'", logEntry["c"])
 	}
 
-	// Verify field order in raw string
-	if !strings.HasPrefix(output, `{"timestamp":`) {
+	// Verify field order in raw string (t = timestamp should be first)
+	if !strings.HasPrefix(output, `{"t":`) {
 		t.Error("Timestamp should be first field")
 	}
 }
@@ -108,12 +108,12 @@ func TestOrderedJSONFormatterWithError(t *testing.T) {
 		t.Fatalf("Failed to parse JSON output: %v", err)
 	}
 
-	// Verify error field
-	if logEntry["error"] != "test error" {
-		t.Errorf("Expected error 'test error', got '%v'", logEntry["error"])
+	// Verify error field (e = error in short format)
+	if logEntry["e"] != "test error" {
+		t.Errorf("Expected error 'test error', got '%v'", logEntry["e"])
 	}
-	if logEntry["level"] != "error" {
-		t.Errorf("Expected level 'error', got '%v'", logEntry["level"])
+	if logEntry["l"] != "error" {
+		t.Errorf("Expected level 'error', got '%v'", logEntry["l"])
 	}
 }
 
@@ -130,10 +130,10 @@ func TestLoggerInfoMethod(t *testing.T) {
 	if !strings.Contains(output, "Info message") {
 		t.Error("Output should contain 'Info message'")
 	}
-	if !strings.Contains(output, `"component":"info-test"`) {
+	if !strings.Contains(output, `"c":"info-test"`) {
 		t.Error("Output should contain component field")
 	}
-	if !strings.Contains(output, `"level":"info"`) {
+	if !strings.Contains(output, `"l":"info"`) {
 		t.Error("Output should contain info level")
 	}
 }
@@ -174,11 +174,11 @@ func TestLoggerErrorMethod(t *testing.T) {
 	var logEntry map[string]interface{}
 	json.Unmarshal([]byte(output), &logEntry)
 
-	if logEntry["error"] != "something went wrong" {
-		t.Errorf("Expected error 'something went wrong', got '%v'", logEntry["error"])
+	if logEntry["e"] != "something went wrong" {
+		t.Errorf("Expected error 'something went wrong', got '%v'", logEntry["e"])
 	}
-	if logEntry["level"] != "error" {
-		t.Errorf("Expected level 'error', got '%v'", logEntry["level"])
+	if logEntry["l"] != "error" {
+		t.Errorf("Expected level 'error', got '%v'", logEntry["l"])
 	}
 }
 
@@ -214,7 +214,7 @@ func TestLoggerWarnMethod(t *testing.T) {
 
 	output := buf.String()
 
-	if !strings.Contains(output, `"level":"warning"`) {
+	if !strings.Contains(output, `"l":"warning"`) {
 		t.Error("Output should contain warning level")
 	}
 	if !strings.Contains(output, "Warning message") {
@@ -233,7 +233,7 @@ func TestLoggerDebugMethod(t *testing.T) {
 
 	output := buf.String()
 
-	if !strings.Contains(output, `"level":"debug"`) {
+	if !strings.Contains(output, `"l":"debug"`) {
 		t.Error("Output should contain debug level")
 	}
 	if !strings.Contains(output, "Debug message") {
@@ -305,17 +305,17 @@ func TestOrderedJSONFormatterFieldOrder(t *testing.T) {
 
 	output := buf.String()
 
-	// Verify order: timestamp, level, component, message should come first
-	timestampIdx := strings.Index(output, `"timestamp"`)
-	levelIdx := strings.Index(output, `"level"`)
-	componentIdx := strings.Index(output, `"component"`)
-	messageIdx := strings.Index(output, `"message"`)
+	// Verify order: t (timestamp), l (level), c (component), m (message) should come first
+	timestampIdx := strings.Index(output, `"t"`)
+	levelIdx := strings.Index(output, `"l"`)
+	componentIdx := strings.Index(output, `"c"`)
+	messageIdx := strings.Index(output, `"m"`)
 
 	if timestampIdx == -1 || levelIdx == -1 || componentIdx == -1 || messageIdx == -1 {
 		t.Fatal("Missing required fields")
 	}
 
 	if !(timestampIdx < levelIdx && levelIdx < componentIdx && componentIdx < messageIdx) {
-		t.Error("Fields are not in correct order: timestamp, level, component, message")
+		t.Error("Fields are not in correct order: t (timestamp), l (level), c (component), m (message)")
 	}
 }

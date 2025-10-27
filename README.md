@@ -40,8 +40,9 @@ For detailed requirements and roadmap, see [docs/PRD.md](docs/PRD.md) and [docs/
 
 ## Deployment
 
-- Deployment Guide: See [docs/deployment.md](docs/deployment.md) for all options (local binaries, Docker, and AWS Fargate).
-- AWS Fargate (recommended for cloud/on-demand):
+- **Deployment Guide**: See [docs/deployment.md](docs/deployment.md) for all options (local binaries, Docker, and AWS Fargate).
+- **Docker Build**: See [docs/docker.md](docs/docker.md) for detailed information about the simplified build process, networking, and troubleshooting.
+- **AWS Fargate** (recommended for cloud/on-demand):
   - End-to-end plan: [docs/fargate.md](docs/fargate.md)
   - One-click infra (CloudFormation): [deployments/cloudformation/fargate.yaml](deployments/cloudformation/fargate.yaml)
   - Start/Stop on demand by setting DesiredCount (1 to start, 0 to stop); fetch the task public IP with the start script in the Fargate doc and pass it to the Agent via `--server-ip`.
@@ -121,9 +122,11 @@ make -f Makefile.linux run-agent-local
 
 #### Option B: Docker Containers
 
+**Note**: Docker builds use a simplified single-stage process that compiles binaries locally and copies them into Alpine containers (~44MB). This approach bypasses corporate firewall issues and builds in ~2 seconds. Certificates include `host.docker.internal` for Docker Desktop networking. See [docs/deployment.md](docs/deployment.md#docker-build-process) for details.
+
 **Build images:**
 ```powershell
-# Windows
+# Windows (builds Linux binary first, then Docker image)
 make -f Makefile.win docker-build-server
 make -f Makefile.win docker-build-agent
 
@@ -132,27 +135,25 @@ make -f Makefile.macos docker-build-server
 make -f Makefile.macos docker-build-agent
 
 # Linux
-make -f Makefile.linux docker-build-server
-make -f Makefile.linux docker-build-agent
+make docker-build-server
+make docker-build-agent
 ```
 
-**Run containers (Windows):**
+**Run containers (Windows PowerShell):**
 ```powershell
 # Server
 docker run --rm `
   -v ${PWD}\certs:/root/certs:ro `
-  -v ${PWD}\configs\server.local.yaml:/root/config/server.yaml:ro `
+  -v ${PWD}\configs\server.windows-docker.yaml:/root/config/server.yaml:ro `
   -p 8443:8443 `
-  fluidity-server `
-  ./fluidity-server --config ./config/server.yaml
+  fluidity-server
 
 # Agent
 docker run --rm `
   -v ${PWD}\certs:/root/certs:ro `
-  -v ${PWD}\configs\agent.local.yaml:/root/config/agent.yaml:ro `
+  -v ${PWD}\configs\agent.windows-docker.yaml:/root/config/agent.yaml:ro `
   -p 8080:8080 `
-  fluidity-agent `
-  ./fluidity-agent --config ./config/agent.yaml
+  fluidity-agent
 ```
 
 **Run containers (macOS/Linux):**
@@ -160,19 +161,19 @@ docker run --rm `
 # Server
 docker run --rm \
   -v "$(pwd)/certs:/root/certs:ro" \
-  -v "$(pwd)/configs/server.local.yaml:/root/config/server.yaml:ro" \
+  -v "$(pwd)/configs/server.windows-docker.yaml:/root/config/server.yaml:ro" \
   -p 8443:8443 \
-  fluidity-server \
-  ./fluidity-server --config ./config/server.yaml
+  fluidity-server
 
 # Agent
 docker run --rm \
   -v "$(pwd)/certs:/root/certs:ro" \
-  -v "$(pwd)/configs/agent.local.yaml:/root/config/agent.yaml:ro" \
+  -v "$(pwd)/configs/agent.windows-docker.yaml:/root/config/agent.yaml:ro" \
   -p 8080:8080 \
-  fluidity-agent \
-  ./fluidity-agent --config ./config/agent.yaml
+  fluidity-agent
 ```
+
+**Note**: Using `server.windows-docker.yaml` and `agent.windows-docker.yaml` configs which bind server to `0.0.0.0` and agent connects to `host.docker.internal` for Docker Desktop compatibility.
 
 ### 3. Configure Browser Proxy
 
@@ -193,14 +194,16 @@ Set browser's HTTP and HTTPS proxy to `localhost:8080`.
 
 **CLI test:**
 ```powershell
-# Windows
+# Windows (add --ssl-no-revoke to skip certificate revocation checks with self-signed certs)
 curl.exe -x http://127.0.0.1:8080 http://example.com -I
-curl.exe -x http://127.0.0.1:8080 https://google.com -I
+curl.exe -x http://127.0.0.1:8080 https://google.com -I --ssl-no-revoke
 
 # macOS/Linux
 curl -x http://127.0.0.1:8080 http://example.com -I
 curl -x http://127.0.0.1:8080 https://google.com -I
 ```
+
+**Note for Windows users:** If you see `CRYPT_E_NO_REVOCATION_CHECK` errors, add the `--ssl-no-revoke` flag. This is safe for local testing and required because Windows' Schannel SSL library checks certificate revocation by default.
 
 **Browser test:**
 - Visit http://example.com or https://google.com

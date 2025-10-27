@@ -1,5 +1,69 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Fluidity - AWS Fargate (ECS) deployment for tunnel server
+Description: |
+  Fluidity - AWS Fargate (ECS) deployment for tunnel server
+  
+  This CloudFormation template deploys the Fluidity tunnel server as a Fargate task.
+  
+  IMPORTANT NOTES:
+  
+  1. CERTIFICATES: The Docker image must include TLS certificates at /root/certs/
+     - Option A: Bake certificates into a custom image (rebuild with certs in build context)
+     - Option B: Use AWS Secrets Manager and update TaskDefinition to mount secrets
+     - Option C: Use EFS volume and store certificates there
+     The default Dockerfile expects certificates to be included when building the image.
+  
+  2. NETWORKING: 
+     - Container binds to 0.0.0.0:8443 (accepts connections on all interfaces)
+     - Security Group allows ingress from AllowedIngressCidr (default: 0.0.0.0/0)
+     - Task gets a public IP for agent connections (AssignPublicIp=ENABLED)
+     - Use GetPublicIPCommand output to find the task's public IP address
+  
+  3. COST OPTIMIZATION:
+     - Set DesiredCount=0 when not in use (no charges when stopped)
+     - Set DesiredCount=1 to start the server (~$0.012/hour for 0.25 vCPU + 0.5GB RAM)
+     - Estimated cost: ~$9/month for 24/7, ~$0.50/month for 2hrs/day
+  
+  4. DEPLOYMENT:
+     - Push your Docker image to Amazon ECR first
+     - Create parameters file (params.json) with required values
+     - Deploy: aws cloudformation deploy --template-file fargate.yaml --stack-name fluidity --parameter-overrides file://params.json --capabilities CAPABILITY_NAMED_IAM
+     - Start: aws ecs update-service --cluster fluidity --service fluidity-server --desired-count 1
+     - Stop:  aws ecs update-service --cluster fluidity --service fluidity-server --desired-count 0
+  
+  5. AGENT CONNECTION:
+     - After starting (DesiredCount=1), wait ~60 seconds for task to be running
+     - Get public IP using the GetPublicIPCommand output
+     - Configure agent with: server_ip=<PUBLIC_IP>, server_port=8443
+     - Agent connects with mTLS using same CA as server
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "ECS Configuration"
+        Parameters:
+          - ClusterName
+          - ServiceName
+          - ContainerImage
+          - DesiredCount
+      - Label:
+          default: "Container Resources"
+        Parameters:
+          - Cpu
+          - Memory
+          - ContainerPort
+      - Label:
+          default: "Networking"
+        Parameters:
+          - VpcId
+          - PublicSubnets
+          - AssignPublicIp
+          - AllowedIngressCidr
+      - Label:
+          default: "Logging"
+        Parameters:
+          - LogGroupName
+          - LogRetentionDays
 
 Parameters:
   ClusterName:
@@ -31,7 +95,8 @@ Parameters:
     Type: Number
     Default: 0
     MinValue: 0
-    Description: Number of running tasks (set to 1 to start)
+    MaxValue: 10
+    Description: Number of running tasks (set to 1 to start, 0 to stop)
   VpcId:
     Type: AWS::EC2::VPC::Id
     Description: VPC where tasks will run (use default VPC id or your own)
@@ -42,18 +107,20 @@ Parameters:
     Type: String
     Default: 0.0.0.0/0
     Description: CIDR allowed to connect to port (use your public IP/32 for security)
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$'
   AssignPublicIp:
     Type: String
     Default: ENABLED
     AllowedValues: [ENABLED, DISABLED]
-    Description: Assign a public IP to tasks
+    Description: Assign a public IP to tasks (required for public internet access)
   LogGroupName:
     Type: String
-    Default: /fluidity/server
+    Default: /ecs/fluidity/server
     Description: CloudWatch Logs group name
   LogRetentionDays:
     Type: Number
     Default: 14
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653]
     Description: Log retention in days
 
 Resources:
@@ -77,6 +144,20 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
       Path: '/'
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ClusterName}-${ServiceName}-task'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Path: '/'
+      # Add policies here if task needs AWS API access (S3, Secrets Manager, etc.)
 
   SecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -103,6 +184,7 @@ Resources:
       NetworkMode: awsvpc
       RequiresCompatibilities: [FARGATE]
       ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
       ContainerDefinitions:
         - Name: server
           Image: !Ref ContainerImage
@@ -110,15 +192,23 @@ Resources:
           PortMappings:
             - ContainerPort: !Ref ContainerPort
               Protocol: tcp
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - curl -f http://localhost:8443/ || exit 1
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
           LogConfiguration:
             LogDriver: awslogs
             Options:
               awslogs-group: !Ref LogGroupName
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: ecs
-          Environment:
-            - Name: FLUIDITY_LOG_LEVEL
-              Value: info
+          # Note: Certificates must be baked into the image or mounted from EFS/Secrets Manager
+          # The container expects certificates at /root/certs/ as defined in Dockerfile
+          # Environment variables can override config file settings if implemented in code
 
   Service:
     Type: AWS::ECS::Service
@@ -140,23 +230,44 @@ Outputs:
     Value: !Ref Cluster
     Export:
       Name: !Sub '${AWS::StackName}-ClusterArn'
+  
   ServiceNameOut:
     Description: Service name
     Value: !Ref Service
     Export:
       Name: !Sub '${AWS::StackName}-ServiceName'
+  
   TaskDefinitionArn:
     Description: Task definition ARN
     Value: !Ref TaskDefinition
     Export:
       Name: !Sub '${AWS::StackName}-TaskDefinitionArn'
+  
   SecurityGroupId:
     Description: Security group ID for the service
     Value: !Ref SecurityGroup
     Export:
       Name: !Sub '${AWS::StackName}-SecurityGroupId'
+  
   LogGroupOut:
     Description: CloudWatch Log Group name
     Value: !Ref LogGroup
     Export:
       Name: !Sub '${AWS::StackName}-LogGroupName'
+  
+  TaskRoleArn:
+    Description: Task role ARN (for runtime permissions)
+    Value: !GetAtt TaskRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-TaskRoleArn'
+  
+  ExecutionRoleArn:
+    Description: Execution role ARN (for image pull and logs)
+    Value: !GetAtt ExecutionRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-ExecutionRoleArn'
+  
+  GetPublicIPCommand:
+    Description: AWS CLI command to get the task's public IP (after starting)
+    Value: !Sub |
+      aws ecs list-tasks --cluster ${ClusterName} --service-name ${ServiceName} --query 'taskArns[0]' --output text | xargs -I {} aws ecs describe-tasks --cluster ${ClusterName} --tasks {} --query 'tasks[0].attachments[0].details[?name==`networkInterfaceId`].value' --output text | xargs -I {} aws ec2 describe-network-interfaces --network-interface-ids {} --query 'NetworkInterfaces[0].Association.PublicIp' --output text

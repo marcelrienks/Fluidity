@@ -55,10 +55,10 @@ fmt:
 	@echo "Formatting code..."
 	$(GOCMD) fmt ./...
 
-docker-build-agent:
+docker-build-agent: build-agent
 	@echo "Building agent Docker image..."
 	docker build -t fluidity-agent -f deployments/agent/Dockerfile .
 
-docker-build-server:
+docker-build-server: build-server
 	@echo "Building server Docker image..."
 	docker build -t fluidity-server -f deployments/server/Dockerfile .

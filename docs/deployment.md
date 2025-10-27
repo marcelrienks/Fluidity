@@ -19,6 +19,66 @@ Certs: Generate client/server certs with scripts in `scripts/` (see Quick Start 
 
 ---
 
+## Docker Build Process
+
+Fluidity uses a **simplified single-stage Docker build** that compiles Go binaries locally and copies them into lightweight Alpine containers (~44MB each).
+
+For comprehensive Docker documentation including networking modes, troubleshooting, and advanced configurations, see **[docs/docker.md](docker.md)**.
+
+### Why This Approach?
+
+1. **Corporate Firewall Bypass**: Multi-stage Docker builds often fail in corporate environments where firewalls block Docker Hub or intercept HTTPS traffic. Building locally avoids these issues.
+2. **Faster Builds**: ~2 seconds vs. 10+ seconds for multi-stage builds with Go module downloads.
+3. **Platform Independence**: Works consistently across Windows, macOS, and Linux development environments.
+
+### How It Works
+
+```
+1. Local Compilation → Static Linux binary (GOOS=linux GOARCH=amd64 CGO_ENABLED=0)
+2. Docker COPY       → Binary copied into alpine/curl:latest container
+3. Container Runtime → Minimal Alpine image with curl (~44MB total)
+```
+
+### Build Commands
+
+All platform Makefiles (`Makefile.win`, `Makefile.macos`, `Makefile.linux`) ensure the Linux binary is built before the Docker image:
+
+```bash
+# Windows
+make -f Makefile.win docker-build-server  # Builds Linux binary first, then Docker image
+make -f Makefile.win docker-build-agent   # Same for agent
+
+# macOS
+make -f Makefile.macos docker-build-server
+make -f Makefile.macos docker-build-agent
+
+# Linux
+make docker-build-server
+make docker-build-agent
+```
+
+### Dockerfile Structure
+
+Both `deployments/server/Dockerfile` and `deployments/agent/Dockerfile` follow this simple pattern:
+
+```dockerfile
+FROM alpine/curl:latest
+WORKDIR /app
+COPY build/fluidity-server .  # Pre-built on host
+RUN mkdir -p ./config ./certs
+COPY configs/server.yaml ./config/
+EXPOSE 8443
+CMD ["./fluidity-server", "--config", "./config/server.yaml"]
+```
+
+**Key Benefits**:
+- No Go installation in container
+- No network calls during Docker build (all dependencies resolved locally)
+- Reproducible builds across environments
+- Small image size with essential utilities (curl for health checks)
+
+---
+
 ## Option A — Local (Binaries)
 
 Best for: development and quick iteration.
@@ -59,14 +119,28 @@ make -f Makefile.linux run-agent-local
 4) Test with curl
 
 ```powershell
-curl.exe -x http://127.0.0.1:8080 https://example.com -I
+# Windows (add --ssl-no-revoke to skip certificate revocation checks)
+curl.exe -x http://127.0.0.1:8080 http://example.com -I
+curl.exe -x http://127.0.0.1:8080 https://example.com -I --ssl-no-revoke
+```
+
+```bash
+# macOS/Linux
+curl -x http://127.0.0.1:8080 http://example.com -I
+curl -x http://127.0.0.1:8080 https://example.com -I
 ```
 
 ---
 
 ## Option B — Docker (Local Containers)
 
-Best for: verifying container builds locally.
+**Best for**: Verifying container builds locally before cloud deployment.
+
+**Note**: Docker containers work seamlessly on all platforms. The certificate generation scripts include `host.docker.internal` (for Windows/macOS Docker Desktop) in the server certificate's Subject Alternative Names, enabling local Docker testing out of the box.
+
+For local development and quick iteration, **Option A (local binaries)** is still simpler as it avoids Docker overhead and starts instantly.
+
+### Steps
 
 1) Build images
 
@@ -91,18 +165,16 @@ make -f Makefile.linux docker-build-agent
 # Server
 docker run --rm `
   -v ${PWD}\certs:/root/certs:ro `
-  -v ${PWD}\configs\server.local.yaml:/root/config/server.yaml:ro `
+  -v ${PWD}\configs\server.windows-docker.yaml:/root/config/server.yaml:ro `
   -p 8443:8443 `
-  fluidity-server `
-  ./fluidity-server --config ./config/server.yaml
+  fluidity-server
 
 # Agent
 docker run --rm `
   -v ${PWD}\certs:/root/certs:ro `
-  -v ${PWD}\configs\agent.local.yaml:/root/config/agent.yaml:ro `
+  -v ${PWD}\configs\agent.windows-docker.yaml:/root/config/agent.yaml:ro `
   -p 8080:8080 `
-  fluidity-agent `
-  ./fluidity-agent --config ./config/agent.yaml
+  fluidity-agent
 ```
 
 3) Run containers (macOS/Linux)
@@ -111,19 +183,41 @@ docker run --rm `
 # Server
 docker run --rm \
   -v "$(pwd)/certs:/root/certs:ro" \
-  -v "$(pwd)/configs/server.local.yaml:/root/config/server.yaml:ro" \
+  -v "$(pwd)/configs/server.windows-docker.yaml:/root/config/server.yaml:ro" \
   -p 8443:8443 \
-  fluidity-server \
-  ./fluidity-server --config ./config/server.yaml
+  fluidity-server
 
 # Agent
 docker run --rm \
   -v "$(pwd)/certs:/root/certs:ro" \
-  -v "$(pwd)/configs/agent.local.yaml:/root/config/agent.yaml:ro" \
+  -v "$(pwd)/configs/agent.windows-docker.yaml:/root/config/agent.yaml:ro" \
   -p 8080:8080 \
-  fluidity-agent \
-  ./fluidity-agent --config ./config/agent.yaml
+  fluidity-agent
 ```
+
+**Config files used:**
+- `server.windows-docker.yaml`: Binds to `0.0.0.0` (accessible from all network interfaces)
+- `agent.windows-docker.yaml`: Connects to `host.docker.internal` (Docker Desktop hostname for host machine)
+
+4) Test the tunnel
+
+```powershell
+# Windows - Test HTTP
+curl.exe -x http://127.0.0.1:8080 http://example.com -I
+
+# Windows - Test HTTPS
+curl.exe -x http://127.0.0.1:8080 https://example.com -I --ssl-no-revoke
+```
+
+```bash
+# macOS/Linux - Test HTTP
+curl -x http://127.0.0.1:8080 http://example.com -I
+
+# macOS/Linux - Test HTTPS
+curl -x http://127.0.0.1:8080 https://example.com -I
+```
+
+You should see `HTTP/1.1 200 OK` responses, and both containers logging the traffic flow.
 
 ---
 
@@ -190,6 +284,61 @@ aws cloudformation deploy `
 ---
 
 ## Troubleshooting
+
+### Local/Docker Testing
+
+**Windows: `CRYPT_E_NO_REVOCATION_CHECK` error with curl**
+
+If you see this error when testing HTTPS:
+```
+curl: (35) schannel: next InitializeSecurityContext failed: CRYPT_E_NO_REVOCATION_CHECK (0x80092012)
+```
+
+**Solution:** Add `--ssl-no-revoke` to your curl command:
+```powershell
+curl.exe -x http://127.0.0.1:8080 https://example.com -I --ssl-no-revoke
+```
+
+**Why:** Windows curl uses Schannel (native Windows SSL) which checks certificate revocation by default. This fails with self-signed certificates or when revocation servers are unreachable. The `--ssl-no-revoke` flag is safe for local testing.
+
+---
+
+**Docker: Port conflicts or connection issues**
+
+If you encounter issues running Docker containers locally:
+
+**Common Issues:**
+- Port already in use: Another process is using port 8443 or 8080
+- Cannot connect: Firewall blocking Docker network traffic
+
+**Solutions:**
+
+1. **Check port usage:**
+```powershell
+# Windows
+netstat -ano | findstr :8443
+netstat -ano | findstr :8080
+```
+
+2. **Stop conflicting processes or change ports:**
+```powershell
+# Edit configs/server.yaml or configs/agent.yaml to use different ports
+```
+
+3. **Verify Docker networking:**
+```powershell
+# Server should listen on 0.0.0.0 (all interfaces)
+# Agent should connect to host.docker.internal (Windows/macOS)
+```
+
+**Note:** The certificate generation scripts now include `host.docker.internal` in the SAN list by default, so Windows/macOS Docker Desktop networking works out of the box.
+
+---**Alternatives:**
+- Use PowerShell: `Invoke-WebRequest -Uri https://example.com -Proxy http://127.0.0.1:8080 -Method Head`
+- Use WSL: `wsl curl -x http://127.0.0.1:8080 https://example.com -I`
+- Test with a browser (configure proxy to 127.0.0.1:8080)
+
+### AWS Fargate
 
 - Fargate task stuck in `PENDING`: check subnets are public, `assignPublicIp=ENABLED`, sufficient Fargate quota
 - No logs: verify `awslogs` configuration and log group exists
