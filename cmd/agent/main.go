@@ -10,9 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	agentConfig "fluidity/internal/agent/config"
-	"fluidity/internal/agent/proxy"
-	"fluidity/internal/agent/tunnel"
+	"fluidity/internal/agent"
 	"fluidity/internal/shared/config"
 	"fluidity/internal/shared/logging"
 	"fluidity/internal/shared/tls"
@@ -84,7 +82,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	}
 
 	// Load configuration
-	cfg, err := config.LoadConfig[agentConfig.Config](configFile, overrides)
+	cfg, err := config.LoadConfig[agent.Config](configFile, overrides)
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
@@ -123,10 +121,10 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		"ca_file", cfg.CACertFile)
 
 	// Create tunnel client
-	tunnelClient := tunnel.NewClient(tlsConfig, cfg.GetServerAddress(), cfg.LogLevel)
+	tunnelClient := agent.NewClient(tlsConfig, cfg.GetServerAddress(), cfg.LogLevel)
 
 	// Create proxy server
-	proxyServer := proxy.NewServer(cfg.LocalProxyPort, tunnelClient, cfg.LogLevel)
+	proxyServer := agent.NewServer(cfg.LocalProxyPort, tunnelClient, cfg.LogLevel)
 
 	// Create context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())

@@ -9,8 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	serverConfig "fluidity/internal/server/config"
-	"fluidity/internal/server/tunnel"
+	"fluidity/internal/server"
 	"fluidity/internal/shared/config"
 	"fluidity/internal/shared/logging"
 	"fluidity/internal/shared/tls"
@@ -82,7 +81,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 
 	// Load configuration
-	cfg, err := config.LoadConfig[serverConfig.Config](configFile, overrides)
+	cfg, err := config.LoadConfig[server.Config](configFile, overrides)
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
@@ -107,7 +106,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		"ca_file", cfg.CACertFile)
 
 	// Create tunnel server
-	tunnelServer, err := tunnel.NewServer(tlsConfig, cfg.GetListenAddress(), cfg.MaxConnections, cfg.LogLevel)
+	tunnelServer, err := server.NewServer(tlsConfig, cfg.GetListenAddress(), cfg.MaxConnections, cfg.LogLevel)
 	if err != nil {
 		return fmt.Errorf("failed to create tunnel server: %w", err)
 	}

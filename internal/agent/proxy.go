@@ -1,4 +1,4 @@
-package proxy
+package agent
 
 import (
 	"context"
@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"fluidity/internal/agent/tunnel"
 	"fluidity/internal/shared/logging"
 	"fluidity/internal/shared/protocol"
 
@@ -19,41 +18,26 @@ import (
 
 // Server handles local HTTP proxy requests
 type Server struct {
-	server     *http.Server
-	tunnelConn *tunnel.Client
+	port       int
+	tunnelConn *Client
 	logger     *logging.Logger
-	ctx        context.Context
-	cancel     context.CancelFunc
+	listener   net.Listener
 }
 
-// NewServer creates a new proxy server
-func NewServer(port int, tunnelConn *tunnel.Client, logLevel string) *Server {
-	ctx, cancel := context.WithCancel(context.Background())
-
+// NewServer creates a new HTTP proxy server
+func NewServer(port int, tunnelConn *Client, logLevel string) *Server {
 	logger := logging.NewLogger("proxy-server")
 	logger.SetLevel(logLevel)
 
-	proxy := &Server{
+	return &Server{
+		port:       port,
 		tunnelConn: tunnelConn,
 		logger:     logger,
-		ctx:        ctx,
-		cancel:     cancel,
 	}
-
-	proxy.server = &http.Server{
-		Addr:         fmt.Sprintf(":%d", port),
-		Handler:      proxy, // Use proxy as handler directly to handle CONNECT
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  60 * time.Second,
-	}
-
-	return proxy
 }
 
 // Start begins serving HTTP proxy requests
 func (p *Server) Start() error {
-	p.logger.Info("Starting HTTP proxy server", "addr", p.server.Addr)
 
 	listener, err := net.Listen("tcp", p.server.Addr)
 	if err != nil {

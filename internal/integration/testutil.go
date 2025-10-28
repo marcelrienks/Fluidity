@@ -15,9 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"fluidity/internal/agent/proxy"
-	"fluidity/internal/agent/tunnel"
-	servertunnel "fluidity/internal/server/tunnel"
+	"fluidity/internal/agent"
+	"fluidity/internal/server"
 )
 
 // TestCerts holds test certificates for mTLS
@@ -152,7 +151,7 @@ func GenerateTestCerts(t *testing.T) *TestCerts {
 
 // TestServer wraps a test tunnel server
 type TestServer struct {
-	Server *servertunnel.Server
+	Server *server.Server
 	Addr   string
 	t      *testing.T
 }
@@ -162,14 +161,14 @@ func StartTestServer(t *testing.T, certs *TestCerts) *TestServer {
 	t.Helper()
 
 	// Use port 0 to get a random free port
-	server, err := servertunnel.NewServer(certs.ServerTLS, "127.0.0.1:0", 10, "error")
+	srv, err := server.NewServer(certs.ServerTLS, "127.0.0.1:0", 10, "error")
 	if err != nil {
 		t.Fatalf("Failed to create test server: %v", err)
 	}
 
 	// Start in goroutine
 	go func() {
-		if err := server.Start(); err != nil {
+		if err := srv.Start(); err != nil {
 			t.Logf("Server stopped with error: %v", err)
 		}
 	}()
@@ -184,17 +183,17 @@ func StartTestServer(t *testing.T, certs *TestCerts) *TestServer {
 	addr := fmt.Sprintf("127.0.0.1:%d", testPort)
 
 	// Recreate server with the specific port so we know the address
-	server.Stop()
+	srv.Stop()
 	time.Sleep(50 * time.Millisecond)
 
-	server, err = servertunnel.NewServer(certs.ServerTLS, addr, 10, "error")
+	srv, err = server.NewServer(certs.ServerTLS, addr, 10, "error")
 	if err != nil {
 		t.Fatalf("Failed to recreate test server: %v", err)
 	}
 
 	// Start again
 	go func() {
-		if err := server.Start(); err != nil {
+		if err := srv.Start(); err != nil {
 			t.Logf("Server stopped with error: %v", err)
 		}
 	}()
@@ -203,7 +202,7 @@ func StartTestServer(t *testing.T, certs *TestCerts) *TestServer {
 	time.Sleep(200 * time.Millisecond)
 
 	ts := &TestServer{
-		Server: server,
+		Server: srv,
 		Addr:   addr,
 		t:      t,
 	}
@@ -220,8 +219,8 @@ func (ts *TestServer) Stop() {
 
 // TestClient wraps a test tunnel client and proxy
 type TestClient struct {
-	Client    *tunnel.Client
-	Proxy     *proxy.Server
+	Client    *agent.Client
+	Proxy     *agent.Server
 	ProxyPort int
 	t         *testing.T
 }
@@ -230,7 +229,7 @@ type TestClient struct {
 func StartTestClient(t *testing.T, serverAddr string, certs *TestCerts) *TestClient {
 	t.Helper()
 
-	client := tunnel.NewClient(certs.ClientTLS, serverAddr, "error")
+	client := agent.NewClient(certs.ClientTLS, serverAddr, "error")
 
 	err := client.Connect()
 	if err != nil {
@@ -241,7 +240,7 @@ func StartTestClient(t *testing.T, serverAddr string, certs *TestCerts) *TestCli
 	proxyPort := GetFreePort(t)
 
 	// Create and start proxy server
-	proxyServer := proxy.NewServer(proxyPort, client, "error")
+	proxyServer := agent.NewServer(proxyPort, client, "error")
 	err = proxyServer.Start()
 	if err != nil {
 		client.Disconnect()
