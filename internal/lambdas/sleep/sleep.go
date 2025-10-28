@@ -22,12 +22,12 @@ type SleepRequest struct {
 
 // SleepResponse represents the output from the Sleep Lambda
 type SleepResponse struct {
-	Action              string  `json:"action"`
-	DesiredCount        int32   `json:"desiredCount,omitempty"`
-	RunningCount        int32   `json:"runningCount,omitempty"`
+	Action               string  `json:"action"`
+	DesiredCount         int32   `json:"desiredCount,omitempty"`
+	RunningCount         int32   `json:"runningCount,omitempty"`
 	AvgActiveConnections float64 `json:"avgActiveConnections,omitempty"`
-	IdleDurationSeconds int64   `json:"idleDurationSeconds,omitempty"`
-	Message             string  `json:"message"`
+	IdleDurationSeconds  int64   `json:"idleDurationSeconds,omitempty"`
+	Message              string  `json:"message"`
 }
 
 // ECSClient interface for testing
@@ -189,23 +189,23 @@ func (h *Handler) HandleRequest(ctx context.Context, request SleepRequest) (*Sle
 		}
 
 		return &SleepResponse{
-			Action:              "scaled_down",
-			DesiredCount:        0,
-			RunningCount:        runningCount,
+			Action:               "scaled_down",
+			DesiredCount:         0,
+			RunningCount:         runningCount,
 			AvgActiveConnections: avgActiveConnections,
-			IdleDurationSeconds: idleDurationSeconds,
-			Message:             fmt.Sprintf("Service scaled down due to inactivity (idle for %d seconds)", idleDurationSeconds),
+			IdleDurationSeconds:  idleDurationSeconds,
+			Message:              fmt.Sprintf("Service scaled down due to inactivity (idle for %d seconds)", idleDurationSeconds),
 		}, nil
 	}
 
 	// Step 7: Service is active, no action
 	return &SleepResponse{
-		Action:              "no_change",
-		DesiredCount:        desiredCount,
-		RunningCount:        runningCount,
+		Action:               "no_change",
+		DesiredCount:         desiredCount,
+		RunningCount:         runningCount,
 		AvgActiveConnections: avgActiveConnections,
-		IdleDurationSeconds: idleDurationSeconds,
-		Message:             fmt.Sprintf("Service is active (avg connections: %.2f, idle: %d seconds)", avgActiveConnections, idleDurationSeconds),
+		IdleDurationSeconds:  idleDurationSeconds,
+		Message:              fmt.Sprintf("Service is active (avg connections: %.2f, idle: %d seconds)", avgActiveConnections, idleDurationSeconds),
 	}, nil
 }
 
