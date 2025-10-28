@@ -12,6 +12,7 @@ This document provides a comprehensive guide to testing the Fluidity secure tunn
 - [End-to-End Tests](#end-to-end-tests)
 - [Test Coverage](#test-coverage)
 - [CI/CD Integration](#cicd-integration)
+- [Lambda Control Plane Testing](#lambda-control-plane-testing)
 - [Troubleshooting](#troubleshooting)
 
 ## Overview
@@ -452,6 +453,141 @@ Make it executable:
 ```bash
 chmod +x .git/hooks/pre-commit
 ```
+
+## Lambda Control Plane Testing
+
+### Unit Tests
+
+Test individual Lambda functions for correct behavior using `pytest` with `moto` for AWS mocking:
+
+**Wake Lambda Tests:**
+- Test wake when task stopped (verifies DesiredCount updated to 1)
+- Test wake when task already running (verifies idempotent behavior)
+
+**Sleep Lambda Tests:**
+- Test sleep when idle (verifies DesiredCount set to 0 based on metrics)
+- Test no sleep when active (verifies DesiredCount remains 1)
+
+**Kill Lambda Tests:**
+- Test kill immediate shutdown (verifies DesiredCount set to 0 without validation)
+
+**Run Lambda Unit Tests:**
+```bash
+# Install dependencies
+pip install pytest moto boto3
+
+# Run all Lambda tests
+pytest tests/lambda/ -v
+
+# Run with coverage
+pytest tests/lambda/ --cov=lambda_functions --cov-report=html
+```
+
+### Integration Tests
+
+Test lifecycle integration between agent, server, and Lambda control plane:
+
+**Agent Lifecycle Tests:**
+- Agent startup wakes server (verify /wake endpoint called, connection retry logic)
+- Agent shutdown kills server (verify /kill endpoint called before exit)
+
+**Server Metrics Tests:**
+- Server emits metrics to CloudWatch (verify periodic emission of ActiveConnections and LastActivityEpochSeconds)
+- Metrics update on activity (verify counters increment with traffic)
+
+### End-to-End Tests
+
+Test complete wake → connect → idle → sleep → kill lifecycle:
+
+**Full Lifecycle Test:**
+```bash
+#!/bin/bash
+# tests/e2e/lambda_lifecycle_test.sh
+
+echo "[1/8] Deploying Lambda control plane..."
+aws cloudformation deploy --template-file lambda.yaml --stack-name fluidity-lambda-test
+
+echo "[2/8] Verifying server is stopped (DesiredCount=0)..."
+# Check ECS service DesiredCount
+
+echo "[3/8] Starting agent (should trigger wake)..."
+# Start agent with wake API configured
+
+echo "[4/8] Waiting for agent to call wake and retry connection..."
+sleep 30
+
+echo "[5/8] Verifying server started (DesiredCount=1)..."
+# Check ECS service DesiredCount
+
+echo "[6/8] Testing HTTP request through tunnel..."
+curl -x http://localhost:8080 http://example.com
+
+echo "[7/8] Stopping agent (should trigger kill)..."
+# Stop agent gracefully
+
+echo "[8/8] Verifying server stopped (DesiredCount=0)..."
+# Check ECS service DesiredCount after 60 seconds
+
+echo "✓ Full lifecycle test passed!"
+```
+
+**Idle Detection Test:**
+```bash
+#!/bin/bash
+# tests/e2e/lambda_idle_test.sh
+
+echo "[1/6] Starting agent and server..."
+# Bring up infrastructure
+
+echo "[2/6] Sending traffic to establish activity..."
+curl -x http://localhost:8080 http://example.com
+
+echo "[3/6] Verifying CloudWatch metrics show recent activity..."
+aws cloudwatch get-metric-statistics --namespace Fluidity \
+    --metric-name LastActivityEpochSeconds --statistics Maximum
+
+echo "[4/6] Waiting for idle timeout (6 minutes)..."
+sleep 360
+
+echo "[5/6] Manually invoking Sleep Lambda..."
+aws lambda invoke --function-name FluiditySleepLambda output.json
+
+echo "[6/6] Verifying server stopped due to idle..."
+# Check ECS service DesiredCount=0
+
+echo "✓ Idle detection test passed!"
+```
+
+**EventBridge Scheduler Test:**
+```bash
+#!/bin/bash
+# tests/e2e/lambda_scheduler_test.sh
+
+echo "[1/4] Verifying EventBridge rules created..."
+aws events describe-rule --name FluiditySleepSchedule
+aws events describe-rule --name FluidityKillSchedule
+
+echo "[2/4] Testing Sleep schedule (rate: 5 minutes)..."
+# Verify rule is enabled and has correct target
+
+echo "[3/4] Testing Kill schedule (cron: daily at 11 PM UTC)..."
+# Verify rule is enabled and has correct target
+
+echo "[4/4] Manually triggering rules..."
+aws events put-events --entries file://test-event-sleep.json
+aws events put-events --entries file://test-event-kill.json
+
+echo "✓ EventBridge scheduler test passed!"
+```
+
+### Performance Tests
+
+Test Lambda cold start and response times:
+
+**Test Scenarios:**
+- Wake Lambda cold start latency (target: < 3 seconds)
+- Wake Lambda warm start latency (target: < 500ms)
+- Agent wake to connect time (target: < 90 seconds total)
 
 ## Troubleshooting
 

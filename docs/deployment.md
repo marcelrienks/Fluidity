@@ -1,7 +1,5 @@
 # Deployment Guide
 
-Last updated: October 27, 2025
-
 This guide covers all supported deployment options for the Fluidity Tunnel Server and Agent: local development, Docker, and AWS Fargate (manual and CloudFormation). Use this as your single reference to get up and running in each environment.
 
 ---
@@ -225,6 +223,8 @@ You should see `HTTP/1.1 200 OK` responses, and both containers logging the traf
 
 Best for: on-demand personal cloud use with minimal management.
 
+**Note**: This option deploys just the server. For automated lifecycle management with Lambda control plane, see Option D.
+
 Summary of steps (full details in `docs/fargate.md`):
 
 1) Build, tag, and push the server image to ECR
@@ -242,6 +242,8 @@ Handy scripts (PowerShell and Bash) to start/stop and print the public IP are in
 ## Option D — AWS Fargate (ECS) — CloudFormation
 
 Best for: repeatable, parameterized provisioning.
+
+**Note**: This option deploys just the server infrastructure. For the complete Lambda control plane (Wake/Sleep/Kill), see Option E.
 
 Use the template at `deployments/cloudformation/fargate.yaml`. It creates:
 - ECS Cluster (Fargate), IAM execution role
@@ -270,7 +272,261 @@ aws cloudformation deploy `
 - Or use `aws ecs update-service --desired-count ...`
 
 4) Fetch Public IP
-- Use the start script in `docs/fargate.md` to get the task’s public IP and pass it to the Agent
+- Use the start script in `docs/fargate.md` to get the task's public IP and pass it to the Agent
+
+---
+
+## Option E — AWS Lambda Control Plane (Recommended for Production)
+
+Best for: automated lifecycle management with cost optimization.
+
+This option deploys the complete serverless control plane with Lambda functions for automated wake/sleep/kill operations, eliminating the need for manual ECS service management.
+
+### Architecture Overview
+
+```
+Agent Startup → Wake Lambda → ECS DesiredCount=1 → Server Starts
+                     ↓
+               Agent Connects (retry for X seconds)
+
+EventBridge (every 5 min) → Sleep Lambda → Check CloudWatch Metrics
+                                                 ↓
+                                          If idle → ECS DesiredCount=0
+
+Agent Shutdown → Kill Lambda → ECS DesiredCount=0 (immediate)
+
+EventBridge (daily 11 PM) → Kill Lambda → ECS DesiredCount=0
+```
+
+### Prerequisites
+
+- Completed Option D (Fargate CloudFormation deployment)
+- Python 3.11 installed (for Lambda functions)
+- AWS SDK boto3 (automatically included in Lambda runtime)
+
+### Components
+
+1. **Wake Lambda**: Checks current ECS state, sets DesiredCount=1 if needed
+2. **Sleep Lambda**: Queries CloudWatch metrics, scales down if idle
+3. **Kill Lambda**: Immediately sets DesiredCount=0 (no validation)
+4. **API Gateway**: HTTPS endpoints for Wake and Kill
+5. **EventBridge Schedulers**: 
+   - Periodic Sleep check (every X minutes)
+   - Daily Kill at specific time
+
+### Step 1: Deploy Lambda Infrastructure
+
+```powershell
+# Deploy Lambda control plane
+aws cloudformation deploy `
+  --template-file deployments/cloudformation/lambda.yaml `
+  --stack-name fluidity-lambda `
+  --parameter-overrides `
+    ECSClusterName=fluidity `
+    ECSServiceName=fluidity-server `
+    IdleThresholdMinutes=15 `
+    SleepCheckIntervalMinutes=5 `
+    DailyKillTime="cron(0 23 * * ? *)" `
+  --capabilities CAPABILITY_NAMED_IAM
+```
+
+### Step 2: Get API Gateway Endpoints
+
+```powershell
+# Get outputs
+aws cloudformation describe-stacks `
+  --stack-name fluidity-lambda `
+  --query 'Stacks[0].Outputs'
+```
+
+Note the following outputs:
+- `WakeAPIEndpoint`: HTTPS endpoint for wake
+- `KillAPIEndpoint`: HTTPS endpoint for kill
+- `APIKey`: API key for authentication
+
+### Step 3: Update Agent Configuration
+
+Add the Lambda control plane settings to your agent config:
+
+```yaml
+# configs/agent.local.yaml
+server_ip: "<PUBLIC_IP>"  # Get from Fargate deployment
+server_port: 8443
+local_proxy_port: 8080
+cert_file: "./certs/client.crt"
+key_file: "./certs/client.key"
+ca_cert_file: "./certs/ca.crt"
+log_level: "info"
+
+# Lambda control plane (NEW)
+wake_api_endpoint: "https://xxxxxxxxxx.execute-api.us-east-1.amazonaws.com/prod/wake"
+kill_api_endpoint: "https://xxxxxxxxxx.execute-api.us-east-1.amazonaws.com/prod/kill"
+api_key: "your-api-key-here"
+connection_timeout: "90s"           # Max time to wait after wake
+connection_retry_interval: "5s"     # Retry interval
+```
+
+### Step 4: Update Server Configuration
+
+Enable CloudWatch metrics emission:
+
+```yaml
+# configs/server.yaml (in Docker image or via env vars)
+listen_addr: "0.0.0.0"
+listen_port: 8443
+cert_file: "/root/certs/server.crt"
+key_file: "/root/certs/server.key"
+ca_cert_file: "/root/certs/ca.crt"
+log_level: "info"
+max_connections: 100
+
+# CloudWatch metrics (NEW)
+emit_metrics: true
+metrics_interval: "60s"  # Emit every 60 seconds
+```
+
+Rebuild and push the server Docker image:
+
+```powershell
+# Update configs/server.yaml with emit_metrics: true
+make -f Makefile.win docker-build-server
+docker tag fluidity-server:latest <ECR_URI>
+docker push <ECR_URI>
+
+# Update ECS task definition to use new image
+aws ecs register-task-definition --cli-input-json file://updated-task-def.json
+```
+
+### Step 5: Test the Lifecycle
+
+**Test Wake:**
+```powershell
+# Agent automatically calls wake on startup
+./build/fluidity-agent --config ./configs/agent.local.yaml
+
+# Monitor wake
+aws logs tail /aws/lambda/fluidity-wake --follow
+```
+
+**Test Sleep (automatic):**
+- Wait 15+ minutes with no traffic
+- Sleep Lambda runs every 5 minutes
+- Check logs:
+  ```powershell
+  aws logs tail /aws/lambda/fluidity-sleep --follow
+  ```
+
+**Test Kill (agent shutdown):**
+```powershell
+# Stop agent (Ctrl+C)
+# Agent calls kill on shutdown
+
+# Or trigger manually
+curl -X POST "https://xxxxxxxxxx.execute-api.us-east-1.amazonaws.com/prod/kill" `
+  -H "x-api-key: your-api-key-here"
+```
+
+**Test Daily Kill:**
+- Scheduled automatically at configured time (default 11 PM UTC)
+- Check EventBridge rules:
+  ```powershell
+  aws events list-rules --name-prefix fluidity
+  ```
+
+### Lambda Function Details
+
+#### Wake Lambda
+- Checks current ECS service state
+- Sets `desiredCount=1` if service is stopped
+- Returns idempotent response if already running
+- Invoked by agent on startup via API Gateway
+
+#### Sleep Lambda
+- Queries CloudWatch for `ActiveConnections` and `LastActivityEpochSeconds` metrics
+- Calculates idle duration based on last activity
+- Sets `desiredCount=0` if idle threshold exceeded
+- Invoked periodically by EventBridge scheduler
+
+#### Kill Lambda
+- Immediately sets `desiredCount=0` without validation
+- Used for emergency shutdown or agent graceful termination
+- Invoked by agent on shutdown via API Gateway
+
+### IAM Permissions
+
+The Lambda functions require:
+- `ecs:DescribeServices`
+- `ecs:UpdateService`
+- `cloudwatch:GetMetricData` (Sleep Lambda only)
+
+The server ECS task requires:
+- `cloudwatch:PutMetricData`
+
+### Cost Optimization
+
+**Lambda costs**:
+- Wake Lambda: ~1 invocation/day = negligible
+- Sleep Lambda: ~288 invocations/day (every 5 min) = < $0.01/month
+- Kill Lambda: ~2 invocations/day = negligible
+- Total Lambda cost: < $0.05/month
+
+**Combined costs** (Lambda + Fargate):
+- 2 hours/day active: ~$0.50/month Fargate + $0.05 Lambda = **$0.55/month**
+- 8 hours/day active: ~$3/month Fargate + $0.05 Lambda = **$3.05/month**
+- Manual management (no Lambda): Same Fargate cost but requires manual start/stop
+
+### Monitoring
+
+**Lambda logs:**
+```powershell
+# Wake
+aws logs tail /aws/lambda/fluidity-wake --follow
+
+# Sleep
+aws logs tail /aws/lambda/fluidity-sleep --follow
+
+# Kill
+aws logs tail /aws/lambda/fluidity-kill --follow
+```
+
+**CloudWatch metrics:**
+```powershell
+# View metrics
+aws cloudwatch get-metric-statistics `
+  --namespace Fluidity `
+  --metric-name ActiveConnections `
+  --dimensions Name=Service,Value=fluidity-server `
+  --start-time 2025-11-01T00:00:00Z `
+  --end-time 2025-11-01T23:59:59Z `
+  --period 300 `
+  --statistics Average
+```
+
+**ECS service status:**
+```powershell
+aws ecs describe-services `
+  --cluster fluidity `
+  --services fluidity-server `
+  --query 'services[0].[desiredCount,runningCount,pendingCount]'
+```
+
+### Troubleshooting
+
+**Agent can't wake server:**
+- Check API Gateway endpoint URL
+- Verify API key is correct
+- Check Lambda execution logs
+- Ensure Lambda has ECS permissions
+
+**Sleep Lambda not scaling down:**
+- Check CloudWatch metrics are being emitted (server config)
+- Verify idle threshold is appropriate
+- Check Lambda logs for metric query results
+
+**Daily kill not working:**
+- Verify EventBridge rule is enabled
+- Check cron expression timezone (UTC)
+- Review Lambda execution logs
 
 ---
 

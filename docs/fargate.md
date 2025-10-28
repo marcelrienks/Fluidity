@@ -1,7 +1,5 @@
 # AWS Fargate Deployment Plan — Fluidity Server
 
-Last updated: October 27, 2025
-
 This guide describes how to deploy the Fluidity Tunnel Server to AWS using ECS on Fargate. It focuses on simplicity, pay‑per‑use operation (start/stop on demand), and minimal AWS footprint.
 
 ---
@@ -257,6 +255,133 @@ By default a Fargate task gets a new public IP each time it starts. Options:
 
 ---
 
+## Lambda Control Plane Integration (Optional)
+
+For automated lifecycle management and cost optimization, you can integrate the Fargate deployment with AWS Lambda functions that control the ECS service based on activity metrics. This is recommended for production deployments.
+
+### Architecture Overview
+
+The Lambda control plane provides three key capabilities:
+1. **Wake Lambda** - Starts the ECS service when agents need connectivity
+2. **Sleep Lambda** - Stops the service after idle period to minimize costs
+3. **Kill Lambda** - Emergency shutdown endpoint
+
+### Key Components
+
+**CloudWatch Metrics:**
+The server emits custom metrics to CloudWatch (namespace: `Fluidity`):
+- `ActiveConnections` - Current number of connected agents
+- `LastActivityEpochSeconds` - Unix timestamp of last activity
+
+**Server Configuration:**
+Enable metrics in `server.yaml`:
+```yaml
+server:
+  host: "0.0.0.0"
+  port: 8443
+  
+metrics:
+  emit_metrics: true          # Enable CloudWatch metrics
+  metrics_interval: 60s       # Emit every 60 seconds
+  namespace: "Fluidity"       # CloudWatch namespace
+  service_name: "fluidity-server"
+```
+
+**Agent Configuration:**
+Configure lifecycle integration in `agent.yaml`:
+```yaml
+agent:
+  proxy_port: 8080
+  server_ip: "<task-public-ip>"
+  server_port: 8443
+  
+lifecycle:
+  wake_endpoint: "https://<api-gateway-url>/wake"
+  kill_endpoint: "https://<api-gateway-url>/kill"
+  api_key: "<api-gateway-key>"
+  wake_timeout: 90s           # Retry connection for 90 seconds
+  wake_retry_interval: 5s     # Check every 5 seconds
+```
+
+**EventBridge Schedulers:**
+- **Sleep Schedule**: `rate(5 minutes)` - Periodically checks if service is idle
+- **Kill Schedule**: `cron(0 23 * * ? *)` - Daily shutdown at 11 PM UTC
+
+### Deployment
+
+1. **Deploy Fargate infrastructure first** (this guide or `fargate.yaml`)
+
+2. **Deploy Lambda control plane** (see `docs/deployment.md` Option E):
+```bash
+# Create lambda.yaml CloudFormation stack
+aws cloudformation deploy \
+  --template-file deployments/cloudformation/lambda.yaml \
+  --stack-name fluidity-lambda \
+  --parameter-overrides \
+      EcsClusterName=fluidity-cluster \
+      EcsServiceName=fluidity-server \
+      IdleThresholdMinutes=5 \
+  --capabilities CAPABILITY_IAM
+```
+
+3. **Update server configuration** with CloudWatch metrics enabled
+
+4. **Update agent configuration** with wake/kill endpoints from API Gateway
+
+### Monitoring
+
+**View CloudWatch Metrics:**
+```bash
+# Check active connections
+aws cloudwatch get-metric-statistics \
+  --namespace Fluidity \
+  --metric-name ActiveConnections \
+  --dimensions Name=ServiceName,Value=fluidity-server \
+  --statistics Maximum \
+  --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 300
+
+# Check last activity timestamp
+aws cloudwatch get-metric-statistics \
+  --namespace Fluidity \
+  --metric-name LastActivityEpochSeconds \
+  --dimensions Name=ServiceName,Value=fluidity-server \
+  --statistics Maximum \
+  --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 300
+```
+
+**Test Lambda Functions:**
+```bash
+# Manually trigger wake
+curl -X POST https://<api-gateway-url>/wake \
+  -H "x-api-key: <your-api-key>"
+
+# Check ECS service status
+aws ecs describe-services \
+  --cluster fluidity-cluster \
+  --services fluidity-server \
+  --query 'services[0].desiredCount'
+
+# Manually trigger kill
+curl -X POST https://<api-gateway-url>/kill \
+  -H "x-api-key: <your-api-key>"
+```
+
+### Cost Impact
+
+With Lambda control plane automation:
+- **Idle periods**: $0/hour (service stopped)
+- **Active periods**: $0.012/hour (Fargate running)
+- **Lambda costs**: ~$0.20-$0.50/month (minimal invocations)
+- **Total**: $0.55-$3.05/month vs $3-$9/month for manual management
+
+For complete Lambda deployment guide, see `docs/deployment.md` Option E.
+
+---
+
 ## Costs (rough order of magnitude)
 
 Fargate (0.25 vCPU, 0.5 GB): ~ $0.012/hour
@@ -265,6 +390,11 @@ Fargate (0.25 vCPU, 0.5 GB): ~ $0.012/hour
 Always‑on 24/7: ≈ $9/month
 
 CloudWatch, ECR storage, data transfer may add small additional costs.
+
+**With Lambda Control Plane:**
+- Lambda invocations: ~$0.20-$0.50/month
+- API Gateway: ~$0.03/month (10,000 requests free tier)
+- Total: $0.55-$3.05/month (automatic idle shutdown)
 
 ---
 

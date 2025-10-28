@@ -1,8 +1,6 @@
 # Product Requirements Document (PRD)
 # Fluidity - HTTP Tunnel Solution
 
-**Last Updated:** October 24, 2025
-
 ---
 
 ## 1. Executive Summary
@@ -57,18 +55,37 @@ A dual-component system consisting of:
 - [x] **FR-003**: Return responses through the established tunnel (Oct 2025)
 - [x] **FR-004**: Support single agent connection with multiple concurrent requests (Oct 2025)
 - [x] **FR-005**: Implement authentication and authorization mechanisms (Oct 2025 - mTLS)
-- [ ] **FR-006**: Provide connection monitoring and health checks (planned)
+- [ ] **FR-006**: Provide connection monitoring and health checks
+- [ ] **FR-033**: Emit CloudWatch metrics for active connections and last activity
+- [ ] **FR-034**: Support configurable metrics emission interval
 
 ### 4.2 Tunnel Agent Requirements
-- [x] **FR-007**: Establish secure connection to tunnel server (Oct 2025)
-- [x] **FR-008**: Intercept local HTTP traffic (Oct 2025 - local proxy on port 8080)
-- [x] **FR-009**: Forward requests through tunnel to server (Oct 2025)
-- [x] **FR-010**: Return responses to local applications (Oct 2025)
-- [x] **FR-011**: Provide configuration interface (Oct 2025 - CLI, config files, env vars)
-- [x] **FR-012**: Support automatic reconnection on connection loss (Oct 2025)
-- [x] **FR-022**: Handle server IP configuration with CLI override and persistent update capability (Oct 2025)
+- [x] **FR-007**: Establish secure connection to tunnel server
+- [x] **FR-008**: Intercept local HTTP traffic (local proxy on port 8080)
+- [x] **FR-009**: Forward requests through tunnel to server
+- [x] **FR-010**: Return responses to local applications
+- [x] **FR-011**: Provide configuration interface (CLI, config files, env vars)
+- [x] **FR-012**: Support automatic reconnection on connection loss
+- [x] **FR-022**: Handle server IP configuration with CLI override and persistent update capability
+- [ ] **FR-035**: Call Wake Lambda on startup via API Gateway
+- [ ] **FR-036**: Retry connection for configurable duration after wake
+- [ ] **FR-037**: Call Kill Lambda on shutdown via API Gateway
+- [ ] **FR-038**: Support API Gateway authentication (API key)
 
-### 4.3 Security Requirements
+### 4.3 Lambda Control Plane Requirements
+- [ ] **FR-039**: Wake Lambda checks ECS service state and sets desired count to 1 if needed
+- [ ] **FR-040**: Sleep Lambda queries CloudWatch metrics and scales down if idle
+- [ ] **FR-041**: Kill Lambda immediately sets desired count to 0 without validation
+- [ ] **FR-042**: API Gateway provides HTTPS endpoints for Wake and Kill Lambdas
+- [ ] **FR-043**: EventBridge triggers Sleep Lambda on configurable schedule (default every 5 minutes)
+- [ ] **FR-044**: EventBridge triggers Kill Lambda on daily schedule (configurable time, default 11 PM UTC)
+- [ ] **FR-045**: Wake Lambda returns service status (waking/already_running/starting)
+- [ ] **FR-046**: Sleep Lambda implements configurable idle threshold (default 15 minutes)
+- [ ] **FR-047**: All Lambdas have proper IAM permissions (least-privilege)
+- [ ] **FR-048**: API Gateway supports API key authentication
+- [ ] **FR-049**: CloudFormation template deploys complete Lambda control plane infrastructure
+
+### 4.4 Security Requirements
 - [x] **FR-013**: Implement end-to-end encryption for tunnel traffic (Oct 2025 - TLS 1.3)
 - [x] **FR-014**: Support secure authentication to prevent unauthorized server access (Oct 2025 - mTLS)
 - [x] **FR-015**: Implement mutual TLS (mTLS) authentication between agent and server (Oct 2025)
@@ -79,7 +96,7 @@ A dual-component system consisting of:
 - [x] **FR-020**: Minimal logging for debugging purposes only (startup, connections, endpoint routing) (Oct 2025)
 - [x] **FR-021**: Support all protocols required for general web browsing (Oct 2025 - HTTP/HTTPS/WebSocket)
 
-### 4.4 Testing Requirements
+### 4.5 Testing Requirements
 - [x] **FR-025**: Develop integration tests for HTTP tunneling functionality (Oct 2025 - test-docker.ps1/.sh)
 - [x] **FR-026**: Develop integration tests for HTTPS CONNECT tunneling (Oct 2025 - test-docker.ps1/.sh)
 - [x] **FR-027**: Implement end-to-end test scenarios with real servers (Oct 2025 - httpbin.org, github.com, example.com)
@@ -148,7 +165,7 @@ A dual-component system consisting of:
 
 ## 7. Implementation Phases
 
-### 7.1 Phase 1: Core Infrastructure ✅ COMPLETE (October 2025)
+### 7.1 Phase 1: Core Infrastructure ✅ COMPLETE
 - ✅ Implement basic tunnel server in Go
 - ✅ Implement basic tunnel agent in Go
 - ✅ Establish secure communication protocol
@@ -165,6 +182,17 @@ A dual-component system consisting of:
 - [ ] Implement monitoring and alerting
 - [ ] Set up CI/CD pipeline for automated deployments
 - [ ] Document cloud deployment procedures
+
+### 7.2.5 Phase 2.5: Lambda Control Plane 🚧 NOT STARTED
+- [ ] Implement Wake Lambda (Python) with ECS API integration
+- [ ] Implement Sleep Lambda with CloudWatch metrics query
+- [ ] Implement Kill Lambda with immediate shutdown
+- [ ] Deploy API Gateway with Wake and Kill endpoints
+- [ ] Configure EventBridge schedulers (periodic Sleep, daily Kill)
+- [ ] Add agent lifecycle integration (wake on startup, kill on shutdown)
+- [ ] Add server CloudWatch metrics emission
+- [ ] Create CloudFormation template for Lambda infrastructure
+- [ ] End-to-end testing with full lifecycle
 
 ### 7.3 Phase 3: Enhanced Features 🚧 PARTIALLY COMPLETE
 - [x] WebSocket protocol support (Oct 2025)

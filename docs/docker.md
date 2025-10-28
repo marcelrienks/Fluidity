@@ -1,7 +1,5 @@
 # Docker Build and Deployment Guide
 
-Last updated: October 27, 2025
-
 This document explains Fluidity's Docker build process, networking considerations, and best practices for containerized deployment.
 
 ---
@@ -334,13 +332,67 @@ Agent connects to: fluidity-server.local:8443 ✅
 
 **CloudFormation Template**: See `deployments/cloudformation/fargate.yaml` for complete setup.
 
+### Configuration for CloudWatch Metrics
+
+When deploying to AWS, the server can emit metrics to CloudWatch for monitoring and automated lifecycle management (see Lambda control plane in `docs/deployment.md` Option E).
+
+**Server Configuration (`server.yaml`):**
+```yaml
+server:
+  host: "0.0.0.0"
+  port: 8443
+  
+tls:
+  cert_file: "/certs/server.crt"
+  key_file: "/certs/server.key"
+  ca_file: "/certs/ca.crt"
+  
+metrics:
+  emit_metrics: true              # Enable CloudWatch metrics
+  metrics_interval: 60s           # Emit every 60 seconds
+  namespace: "Fluidity"           # CloudWatch namespace
+  service_name: "fluidity-server" # Service dimension
+```
+
+**Environment Variables (Alternative):**
+```bash
+# Can override config via environment variables
+FLUIDITY_METRICS_ENABLED=true
+FLUIDITY_METRICS_INTERVAL=60s
+FLUIDITY_NAMESPACE=Fluidity
+FLUIDITY_SERVICE_NAME=fluidity-server
+```
+
+**Metrics Emitted:**
+- `ActiveConnections` (Gauge) - Current number of connected agents
+- `LastActivityEpochSeconds` (Timestamp) - Unix timestamp of last tunnel activity
+
+**IAM Permissions Required:**
+- `cloudwatch:PutMetricData` on namespace `Fluidity`
+
+**Viewing Metrics:**
+```bash
+# Check active connections
+aws cloudwatch get-metric-statistics \
+  --namespace Fluidity \
+  --metric-name ActiveConnections \
+  --dimensions Name=ServiceName,Value=fluidity-server \
+  --statistics Maximum \
+  --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 300
+```
+
+For automated lifecycle management using these metrics, see `docs/deployment.md` Option E (Lambda control plane).
+
 ### Best Practices
 
 1. **Secrets Management**: Use AWS Secrets Manager or SSM Parameter Store for certificates and keys (not baked into image)
 2. **Health Checks**: ECS can use curl to check `https://localhost:8443/health` (add health endpoint if needed)
 3. **Logging**: CloudWatch Logs integration (already in CloudFormation template)
 4. **Security Groups**: Restrict port 8443 to specific IP ranges
-5. **Cost Optimization**: Set `DesiredCount=0` when not in use (~$0.012/hour when running)
+5. **Cost Optimization**: Set `DesiredCount=0` when not in use (~$0.012/hour when running), or use Lambda control plane for automatic idle shutdown
+6. **Metrics**: Enable CloudWatch metrics for monitoring and automated lifecycle decisions
 
 ---
 

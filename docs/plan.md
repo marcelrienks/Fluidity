@@ -2,8 +2,6 @@
 
 This document outlines all outstanding work required for Phase 1, organized by phases and actionable steps. It replaces `PHASE1.md`.
 
-**Last Updated:** October 24, 2025
-
 ---
 
 ## Current Status Summary
@@ -87,12 +85,101 @@ This document outlines all outstanding work required for Phase 1, organized by p
 ### Deployment & Scaling
 - [ ] Deploy Tunnel Server to chosen cloud provider (AWS, Azure, GCP, etc.)
 - [ ] Implement container orchestration (Docker Compose, Kubernetes, or cloud container services)
+- [ ] **Lambda Control Plane (NEW)**: Deploy Wake/Sleep/Kill Lambda functions
+- [ ] **API Gateway (NEW)**: Set up HTTPS endpoints for lifecycle management
+- [ ] **EventBridge Schedulers (NEW)**: Configure periodic and daily triggers
 - [ ] Set up CI/CD pipeline for automated builds and deployments
 - [ ] Implement scaling and monitoring for cloud deployment
 
 ### Configuration & Networking
 - [ ] Handle dynamic IP address changes for cloud deployments
 - [ ] Secure cloud networking and firewall rules
+- [ ] **Agent Lifecycle Integration (NEW)**: Add wake/kill API calls on startup/shutdown
+- [ ] **Server Metrics Integration (NEW)**: Emit CloudWatch metrics for activity tracking
+
+---
+
+## Phase 2.5: Lambda Control Plane Implementation (NEW)
+
+### Lambda Functions
+- [ ] Create `deployments/lambda/wake/` with Python implementation
+- [ ] Create `deployments/lambda/sleep/` with CloudWatch metrics query logic
+- [ ] Create `deployments/lambda/kill/` with immediate shutdown logic
+- [ ] Create IAM roles for each Lambda (least-privilege policies)
+- [ ] Add environment variable configuration (cluster/service names, thresholds)
+- [ ] Implement error handling and logging in all Lambdas
+
+### API Gateway Setup
+- [ ] Create REST API in AWS API Gateway
+- [ ] Configure `/wake` endpoint → Wake Lambda integration
+- [ ] Configure `/kill` endpoint → Kill Lambda integration
+- [ ] Set up API key authentication
+- [ ] Configure throttling and rate limits (10 req/min per endpoint)
+- [ ] Add CloudWatch logging for API Gateway
+- [ ] Test endpoints with curl/Postman
+
+### EventBridge Configuration
+- [ ] Create Sleep Lambda schedule rule (rate: every X minutes, configurable)
+- [ ] Create Kill Lambda schedule rule (cron: daily at specified time)
+- [ ] Set up retry policies for Lambda invocations
+- [ ] Add CloudWatch Events logging
+- [ ] Test schedule triggers
+
+### Agent Lifecycle Integration
+- [ ] Create `internal/agent/lifecycle/` package
+- [ ] Implement Wake API client with retry logic
+- [ ] Implement Kill API client
+- [ ] Add configuration for API endpoints and API key
+- [ ] Add connection retry with configurable timeout (default 90s)
+- [ ] Add connection retry interval (default 5s)
+- [ ] Integrate wake call in agent startup flow
+- [ ] Integrate kill call in agent shutdown flow
+- [ ] Add logging for lifecycle events
+
+### Server Metrics Integration
+- [ ] Create `internal/server/metrics/` package
+- [ ] Implement CloudWatch PutMetricData client
+- [ ] Add atomic counters for active connections
+- [ ] Add atomic timestamp for last activity
+- [ ] Emit `ActiveConnections` metric (gauge)
+- [ ] Emit `LastActivityEpochSeconds` metric (timestamp)
+- [ ] Add configurable emission interval (default 60s)
+- [ ] Add enable/disable flag in server config
+- [ ] Update server to track connection lifecycle
+- [ ] Update server to update last activity on each request
+
+### CloudFormation Templates
+- [ ] Create `deployments/cloudformation/lambda.yaml`
+  - [ ] Lambda function definitions (Wake, Sleep, Kill)
+  - [ ] IAM roles and policies
+  - [ ] API Gateway REST API
+  - [ ] EventBridge schedule rules
+  - [ ] Outputs for API endpoints and keys
+- [ ] Update `deployments/cloudformation/fargate.yaml`
+  - [ ] Add CloudWatch PutMetricData permission to task role
+  - [ ] Add environment variables for metrics config
+- [ ] Create `deployments/cloudformation/params.lambda.example.json`
+- [ ] Document deployment process in README
+
+### Testing
+- [ ] Unit tests for lifecycle client (`internal/agent/lifecycle`)
+- [ ] Unit tests for metrics emitter (`internal/server/metrics`)
+- [ ] Integration test: Wake Lambda → ECS update
+- [ ] Integration test: Sleep Lambda → CloudWatch query → ECS update
+- [ ] Integration test: Kill Lambda → ECS update
+- [ ] End-to-end test: Agent startup → wake → connect → shutdown → kill
+- [ ] End-to-end test: Idle detection → automatic sleep
+- [ ] Load test: Multiple wake/kill calls (debounce validation)
+
+### Documentation
+- [ ] Update `docs/architecture.md` with Lambda control plane design ✅
+- [ ] Update `docs/deployment.md` with Lambda deployment guide ✅
+- [ ] Update `docs/plan.md` with implementation tasks ✅
+- [ ] Update `docs/fargate.md` with Lambda integration details
+- [ ] Update `README.md` with Lambda control plane overview
+- [ ] Create `docs/lambda-control-plane.md` with detailed guide
+- [ ] Add troubleshooting section for Lambda/API Gateway issues
+- [ ] Document cost breakdown (Fargate + Lambda + API Gateway)
 
 ---
 
