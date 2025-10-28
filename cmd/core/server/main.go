@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"fluidity/internal/server"
+	"fluidity/internal/core/server"
 	"fluidity/internal/shared/config"
 	"fluidity/internal/shared/logging"
 	"fluidity/internal/shared/tls"

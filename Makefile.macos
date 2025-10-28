@@ -10,9 +10,9 @@ AGENT_BINARY=fluidity-agent
 SERVER_BINARY=fluidity-server
 WAKE_LAMBDA_BINARY=bootstrap
 BUILD_DIR=build
-AGENT_DIR=cmd/agent
-SERVER_DIR=cmd/server
-WAKE_LAMBDA_DIR=cmd/lambda/wake
+AGENT_DIR=cmd/core/agent
+SERVER_DIR=cmd/core/server
+WAKE_LAMBDA_DIR=cmd/lambdas/wake
 
 .PHONY: all build clean test deps run-agent-local run-server-local docker-build-agent docker-build-server build-lambda-wake package-lambda-wake
 
@@ -64,7 +64,7 @@ deps:
 test:
 	@echo "Running tests..."
 	$(GOTEST) -v ./internal/...
-	$(GOTEST) -v ./cmd/lambda/...
+	$(GOTEST) -v ./cmd/lambdas/...
 
 fmt:
 	@echo "Formatting code..."

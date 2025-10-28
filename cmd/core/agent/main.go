@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"fluidity/internal/agent"
+	"fluidity/internal/core/agent"
 	"fluidity/internal/shared/config"
 	"fluidity/internal/shared/logging"
 	"fluidity/internal/shared/tls"

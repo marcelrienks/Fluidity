@@ -1,4 +1,4 @@
-package integration
+package tests
 
 import (
 	"crypto/rand"
@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"fluidity/internal/agent"
-	"fluidity/internal/server"
+	"fluidity/internal/core/agent"
+	"fluidity/internal/core/server"
 )
 
 // TestCerts holds test certificates for mTLS

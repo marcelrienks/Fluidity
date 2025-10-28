@@ -30,11 +30,11 @@ try {
         $env:CGO_ENABLED = "0"
         
         Write-Host "  Building server..." -ForegroundColor Cyan
-        go build -o build/fluidity-server ./cmd/server
+        go build -o build/fluidity-server ./cmd/core/server
         if ($LASTEXITCODE -ne 0) { throw "Server build failed" }
         
         Write-Host "  Building agent..." -ForegroundColor Cyan
-        go build -o build/fluidity-agent ./cmd/agent
+        go build -o build/fluidity-agent ./cmd/core/agent
         if ($LASTEXITCODE -ne 0) { throw "Agent build failed" }
         
         Write-Host "  [OK] Binaries built" -ForegroundColor Green

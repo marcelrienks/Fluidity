@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"fluidity/internal/lambda/wake"
+	"fluidity/internal/lambdas/wake"
 
 	"github.com/aws/aws-lambda-go/lambda"
 )
