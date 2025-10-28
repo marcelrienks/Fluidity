@@ -52,9 +52,9 @@ This document outlines the development roadmap, organized by completion status a
 ## 🚧 Phase 2: AWS Lambda Control Plane (IN PROGRESS)
 
 ### Lambda Functions
-- [ ] Wake Lambda (Python) - check state, set DesiredCount=1
-- [ ] Sleep Lambda (Python) - query CloudWatch, scale down if idle
-- [ ] Kill Lambda (Python) - immediate shutdown
+- [ ] Wake Lambda (Go) - check state, set DesiredCount=1
+- [ ] Sleep Lambda (Go) - query CloudWatch, scale down if idle
+- [ ] Kill Lambda (Go) - immediate shutdown
 - [ ] IAM roles with least-privilege policies
 - [ ] Error handling and structured logging
 - [ ] Lambda versioning and aliases
