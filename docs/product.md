@@ -346,9 +346,9 @@ Protocol Details:
 
 ---
 
-## 12. Appendices
+## Related Documentation
 
-### 12.1 Related Documents
-- [README.md](../README.md) - Project overview and architecture
-- [Architecture Design](./architecture.md) - Detailed technical architecture (TBD)
-- [API Specification](./api.md) - Server-agent communication protocol (TBD)
+- **[Architecture](architecture.md)** - Detailed technical architecture and design
+- **[Project Plan](plan.md)** - Development roadmap and task tracking
+- **[Deployment Guide](deployment.md)** - All deployment options
+- **[Testing Guide](testing.md)** - Testing strategy
