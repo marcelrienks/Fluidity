@@ -87,15 +87,16 @@ This document outlines the development roadmap, organized by completion status a
 - [x] Fallback: work without Lambda control plane
 
 ### Server Integration
-- [ ] Create `internal/server/metrics/` package
-- [ ] CloudWatch PutMetricData client
-- [ ] Track active connections (atomic counter)
-- [ ] Track last activity timestamp (atomic)
-- [ ] Emit `ActiveConnections` metric (60s interval)
-- [ ] Emit `LastActivityEpochSeconds` metric
-- [ ] Metric batching to reduce API calls
-- [ ] Error handling (graceful degradation without CloudWatch)
-- [ ] Configurable region
+- [x] Create `internal/core/server/metrics/` package (config.go, metrics.go, metrics_test.go)
+- [x] CloudWatch PutMetricData client with AWS SDK v2
+- [x] Track active connections (atomic.Int64 counter)
+- [x] Track last activity timestamp (atomic.Int64 Unix epoch)
+- [x] Emit `ActiveConnections` metric (60s configurable interval)
+- [x] Emit `LastActivityEpochSeconds` metric
+- [x] Metric batching (automatic via AWS SDK)
+- [x] Error handling (graceful degradation without CloudWatch)
+- [x] Integrated into server lifecycle (Start/Stop, connections, activity)
+- [x] Comprehensive unit tests (6 tests, all passing)
 
 ### Infrastructure as Code
 - [x] `deployments/cloudformation/lambda.yaml`

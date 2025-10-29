@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"fluidity/internal/core/server/metrics"
 	"fluidity/internal/shared/circuitbreaker"
 	"fluidity/internal/shared/logging"
 	"fluidity/internal/shared/protocol"
@@ -28,6 +29,7 @@ type Server struct {
 	httpClient     *http.Client
 	circuitBreaker *circuitbreaker.CircuitBreaker
 	retryConfig    retry.Config
+	metricsEmitter *metrics.Emitter
 	logger         *logging.Logger
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -76,11 +78,24 @@ func NewServer(tlsConfig *tls.Config, addr string, maxConns int, logLevel string
 		Multiplier:   2.0,
 	}
 
+	// Initialize metrics emitter (optional - gracefully disabled if not configured)
+	metricsConfig, err := metrics.LoadConfig()
+	if err != nil {
+		logger.Warn("Failed to load metrics configuration", "error", err.Error())
+		metricsConfig = &metrics.Config{Enabled: false}
+	}
+
+	metricsEmitter, err := metrics.NewEmitter(metricsConfig, logger)
+	if err != nil {
+		logger.Warn("Failed to create metrics emitter", "error", err.Error())
+	}
+
 	return &Server{
 		listener:       listener,
 		httpClient:     httpClient,
 		circuitBreaker: cb,
 		retryConfig:    retryConfig,
+		metricsEmitter: metricsEmitter,
 		logger:         logger,
 		ctx:            ctx,
 		cancel:         cancel,
@@ -93,6 +108,11 @@ func NewServer(tlsConfig *tls.Config, addr string, maxConns int, logLevel string
 // Start begins accepting connections
 func (s *Server) Start() error {
 	s.logger.Info("Tunnel server starting", "addr", s.listener.Addr())
+
+	// Start metrics emitter
+	if s.metricsEmitter != nil {
+		s.metricsEmitter.Start()
+	}
 
 	for {
 		select {
@@ -133,6 +153,11 @@ func (s *Server) Stop() error {
 	s.logger.Info("Stopping tunnel server")
 	s.cancel()
 
+	// Stop metrics emitter
+	if s.metricsEmitter != nil {
+		s.metricsEmitter.Stop()
+	}
+
 	if s.listener != nil {
 		s.listener.Close()
 	}
@@ -162,11 +187,21 @@ func (s *Server) handleConnection(conn *tls.Conn) {
 		s.connMutex.Lock()
 		s.activeConns--
 		s.connMutex.Unlock()
+
+		// Decrement metrics
+		if s.metricsEmitter != nil {
+			s.metricsEmitter.DecrementConnections()
+		}
 	}()
 
 	s.connMutex.Lock()
 	s.activeConns++
 	s.connMutex.Unlock()
+
+	// Increment metrics
+	if s.metricsEmitter != nil {
+		s.metricsEmitter.IncrementConnections()
+	}
 
 	// Complete the TLS handshake before inspecting connection state
 	if err := conn.Handshake(); err != nil {
@@ -287,6 +322,11 @@ func (s *Server) handleConnection(conn *tls.Conn) {
 // processRequest handles a single HTTP request with circuit breaker and retry logic
 func (s *Server) processRequest(req *protocol.Request, encoder *json.Encoder, mu *sync.Mutex) {
 	s.logger.Debug("Processing request", "id", req.ID, "method", req.Method, "url", req.URL)
+
+	// Update last activity timestamp
+	if s.metricsEmitter != nil {
+		s.metricsEmitter.UpdateLastActivity()
+	}
 
 	// Log the target endpoint (domain only)
 	s.logRequest(req)
