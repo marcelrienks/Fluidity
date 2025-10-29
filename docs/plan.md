@@ -76,15 +76,15 @@ This document outlines the development roadmap, organized by completion status a
 - [x] Retry policies for failed invocations
 
 ### Agent Integration
-- [ ] Create `internal/agent/lifecycle/` package
-- [ ] Wake API client with exponential backoff retry
-- [ ] Kill API client
-- [ ] Configuration (endpoints, API key from env var)
-- [ ] Connection retry logic (90s timeout, 5s interval)
-- [ ] Startup: wake → retry connection
-- [ ] Shutdown: kill gracefully
-- [ ] Circuit breaker for API calls
-- [ ] Fallback: work without Lambda control plane
+- [x] Create `internal/core/agent/lifecycle/` package
+- [x] Wake API client with exponential backoff retry
+- [x] Kill API client
+- [x] Configuration (endpoints, API key from env var)
+- [x] Connection retry logic (90s timeout, 5s interval)
+- [x] Startup: wake → retry connection
+- [x] Shutdown: kill gracefully
+- [x] Circuit breaker for API calls
+- [x] Fallback: work without Lambda control plane
 
 ### Server Integration
 - [ ] Create `internal/server/metrics/` package

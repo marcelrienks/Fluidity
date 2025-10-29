@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"fluidity/internal/core/agent"
+	"fluidity/internal/core/agent/lifecycle"
 	"fluidity/internal/shared/config"
 	"fluidity/internal/shared/logging"
 	"fluidity/internal/shared/tls"
@@ -120,6 +121,30 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		"key_file", cfg.KeyFile,
 		"ca_file", cfg.CACertFile)
 
+	// Load lifecycle configuration (optional - will be disabled if not configured)
+	lifecycleConfig, err := lifecycle.LoadConfig()
+	if err != nil {
+		logger.Warn("Failed to load lifecycle configuration", "error", err.Error())
+		lifecycleConfig = &lifecycle.Config{Enabled: false}
+	}
+
+	// Create lifecycle client
+	lifecycleClient, err := lifecycle.NewClient(lifecycleConfig, logger)
+	if err != nil {
+		logger.Warn("Failed to create lifecycle client", "error", err.Error())
+	}
+
+	// If lifecycle is enabled, call Wake API before connecting
+	if lifecycleClient != nil && lifecycleConfig.Enabled {
+		logger.Info("Lifecycle management enabled, waking ECS service")
+		wakeCtx, wakeCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if err := lifecycleClient.Wake(wakeCtx); err != nil {
+			// Log warning but continue - fallback to connecting without wake
+			logger.Warn("Failed to wake ECS service, continuing anyway", "error", err.Error())
+		}
+		wakeCancel()
+	}
+
 	// Create tunnel client
 	tunnelClient := agent.NewClient(tlsConfig, cfg.GetServerAddress(), cfg.LogLevel)
 
@@ -141,6 +166,20 @@ func runAgent(cmd *cobra.Command, args []string) error {
 
 	// Connection management goroutine
 	go func() {
+		// If lifecycle is enabled, wait for server connection after wake
+		if lifecycleClient != nil && lifecycleConfig.Enabled {
+			logger.Info("Waiting for server connection after wake")
+			waitCtx, waitCancel := context.WithTimeout(ctx, lifecycleConfig.ConnectionTimeout)
+			err := lifecycleClient.WaitForConnection(waitCtx, func() bool {
+				return tunnelClient.IsConnected()
+			})
+			waitCancel()
+
+			if err != nil {
+				logger.Warn("Server connection wait timeout, will continue with normal connection retry", "error", err.Error())
+			}
+		}
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -175,6 +214,16 @@ func runAgent(cmd *cobra.Command, args []string) error {
 
 	// Graceful shutdown
 	cancel()
+
+	// If lifecycle is enabled, call Kill API
+	if lifecycleClient != nil && lifecycleConfig.Enabled {
+		logger.Info("Calling Kill API for graceful ECS service shutdown")
+		killCtx, killCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if err := lifecycleClient.Kill(killCtx); err != nil {
+			logger.Warn("Failed to kill ECS service", "error", err.Error())
+		}
+		killCancel()
+	}
 
 	// Stop proxy server
 	if err := proxyServer.Stop(); err != nil {
