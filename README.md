@@ -100,7 +100,8 @@ go test ./internal/... -cover
 - **[Architecture](docs/architecture.md)** - Technical design and Lambda control plane
 - **[Deployment Guide](docs/deployment.md)** - All deployment options
 - **[Testing Guide](docs/testing.md)** - Comprehensive testing documentation
-- **[Product Requirements](docs/PRD.md)** - Feature requirements and specifications
+- **[Lambda Functions](docs/lambda-functions.md)** - Wake/Sleep/Kill Lambda control plane
+- **[Product Requirements](docs/product.md)** - Feature requirements and specifications
 - **[Project Plan](docs/plan.md)** - Development roadmap
 
 ## Disclaimer
