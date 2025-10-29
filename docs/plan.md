@@ -62,18 +62,18 @@ This document outlines the development roadmap, organized by completion status a
 - [x] Reserved concurrency limits
 
 ### API Gateway
-- [ ] REST API with `/wake` and `/kill` endpoints
-- [ ] API key authentication
-- [ ] Throttling and rate limits
-- [ ] CloudWatch execution logging
-- [ ] Access logging
-- [ ] Request/response validation
-- [ ] Usage plans and quotas
+- [x] REST API with `/wake` and `/kill` endpoints
+- [x] API key authentication
+- [x] Throttling and rate limits
+- [x] CloudWatch execution logging
+- [x] Access logging
+- [x] Request/response validation
+- [x] Usage plans and quotas
 
 ### EventBridge Schedulers
-- [ ] Sleep Lambda schedule (configurable rate, default 5 min)
-- [ ] Kill Lambda schedule (configurable cron, default 11 PM UTC)
-- [ ] Retry policies for failed invocations
+- [x] Sleep Lambda schedule (configurable rate, default 5 min)
+- [x] Kill Lambda schedule (configurable cron, default 11 PM UTC)
+- [x] Retry policies for failed invocations
 
 ### Agent Integration
 - [ ] Create `internal/agent/lifecycle/` package
@@ -98,7 +98,7 @@ This document outlines the development roadmap, organized by completion status a
 - [ ] Configurable region
 
 ### Infrastructure as Code
-- [ ] `deployments/cloudformation/lambda.yaml`
+- [x] `deployments/cloudformation/lambda.yaml`
   - Lambda functions, IAM roles, API Gateway, EventBridge
 - [ ] Update `fargate.yaml` with CloudWatch permissions
 - [ ] Parameter files (dev/prod environments)
