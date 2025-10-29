@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"fluidity/internal/shared/logger"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
@@ -32,27 +34,41 @@ type Handler struct {
 	ecsClient   ECSClient
 	clusterName string
 	serviceName string
+	logger      *logger.Logger
 }
 
 // NewHandler creates a new kill handler with AWS SDK clients
 func NewHandler(ctx context.Context, clusterName, serviceName string) (*Handler, error) {
+	log := logger.NewFromEnv()
+
+	log.Info("Initializing Kill Lambda handler", map[string]interface{}{
+		"clusterName": clusterName,
+		"serviceName": serviceName,
+	})
+
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
+		log.Error("Failed to load AWS SDK config", err)
 		return nil, fmt.Errorf("unable to load AWS SDK config: %w", err)
 	}
 
 	if clusterName == "" {
+		log.Error("Missing required parameter: clusterName", nil)
 		return nil, fmt.Errorf("clusterName is required")
 	}
 
 	if serviceName == "" {
+		log.Error("Missing required parameter: serviceName", nil)
 		return nil, fmt.Errorf("serviceName is required")
 	}
+
+	log.Info("Kill Lambda handler initialized successfully")
 
 	return &Handler{
 		ecsClient:   ecs.NewFromConfig(cfg),
 		clusterName: clusterName,
 		serviceName: serviceName,
+		logger:      log,
 	}, nil
 }
 
@@ -62,6 +78,7 @@ func NewHandlerWithClient(ecsClient ECSClient, clusterName, serviceName string) 
 		ecsClient:   ecsClient,
 		clusterName: clusterName,
 		serviceName: serviceName,
+		logger:      logger.New("info"),
 	}
 }
 
@@ -78,6 +95,11 @@ func (h *Handler) HandleRequest(ctx context.Context, request KillRequest) (*Kill
 		serviceName = request.ServiceName
 	}
 
+	h.logger.Info("Processing kill request", map[string]interface{}{
+		"clusterName": clusterName,
+		"serviceName": serviceName,
+	})
+
 	// Set desired count to 0 immediately (no checks, no validation)
 	updateInput := &ecs.UpdateServiceInput{
 		Cluster:      aws.String(clusterName),
@@ -85,10 +107,23 @@ func (h *Handler) HandleRequest(ctx context.Context, request KillRequest) (*Kill
 		DesiredCount: aws.Int32(0),
 	}
 
+	h.logger.Info("Initiating immediate service shutdown", map[string]interface{}{
+		"clusterName": clusterName,
+		"serviceName": serviceName,
+	})
+
 	_, err := h.ecsClient.UpdateService(ctx, updateInput)
 	if err != nil {
+		h.logger.Error("Failed to update ECS service", err, map[string]interface{}{
+			"clusterName": clusterName,
+			"serviceName": serviceName,
+		})
 		return nil, fmt.Errorf("failed to update ECS service: %w", err)
 	}
+
+	h.logger.Info("Service shutdown initiated successfully", map[string]interface{}{
+		"desiredCount": 0,
+	})
 
 	return &KillResponse{
 		Status:       "killed",

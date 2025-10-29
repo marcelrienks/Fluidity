@@ -55,11 +55,11 @@ This document outlines the development roadmap, organized by completion status a
 - [x] Wake Lambda (Go) - check state, set DesiredCount=1
 - [x] Sleep Lambda (Go) - query CloudWatch, scale down if idle
 - [x] Kill Lambda (Go) - immediate shutdown
-- [ ] IAM roles with least-privilege policies
-- [ ] Error handling and structured logging
-- [ ] Lambda versioning and aliases
-- [ ] Timeout configuration (30s Wake/Kill, 60s Sleep)
-- [ ] Reserved concurrency limits
+- [x] IAM roles with least-privilege policies
+- [x] Error handling and structured logging
+- [x] Lambda versioning and aliases
+- [x] Timeout configuration (30s Wake/Kill, 60s Sleep)
+- [x] Reserved concurrency limits
 
 ### API Gateway
 - [ ] REST API with `/wake` and `/kill` endpoints

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"fluidity/internal/shared/logger"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
@@ -49,30 +51,47 @@ type Handler struct {
 	serviceName        string
 	idleThresholdMins  int
 	lookbackPeriodMins int
+	logger             *logger.Logger
 }
 
 // NewHandler creates a new sleep handler with AWS SDK clients
 func NewHandler(ctx context.Context, clusterName, serviceName string, idleThresholdMins, lookbackPeriodMins int) (*Handler, error) {
+	log := logger.NewFromEnv()
+
+	log.Info("Initializing Sleep Lambda handler", map[string]interface{}{
+		"clusterName":        clusterName,
+		"serviceName":        serviceName,
+		"idleThresholdMins":  idleThresholdMins,
+		"lookbackPeriodMins": lookbackPeriodMins,
+	})
+
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
+		log.Error("Failed to load AWS SDK config", err)
 		return nil, fmt.Errorf("unable to load AWS SDK config: %w", err)
 	}
 
 	if clusterName == "" {
+		log.Error("Missing required parameter: clusterName", nil)
 		return nil, fmt.Errorf("clusterName is required")
 	}
 
 	if serviceName == "" {
+		log.Error("Missing required parameter: serviceName", nil)
 		return nil, fmt.Errorf("serviceName is required")
 	}
 
 	if idleThresholdMins <= 0 {
 		idleThresholdMins = 15 // Default: 15 minutes
+		log.Debug("Using default idleThresholdMins", map[string]interface{}{"value": 15})
 	}
 
 	if lookbackPeriodMins <= 0 {
 		lookbackPeriodMins = 10 // Default: 10 minutes
+		log.Debug("Using default lookbackPeriodMins", map[string]interface{}{"value": 10})
 	}
+
+	log.Info("Sleep Lambda handler initialized successfully")
 
 	return &Handler{
 		ecsClient:          ecs.NewFromConfig(cfg),
@@ -81,6 +100,7 @@ func NewHandler(ctx context.Context, clusterName, serviceName string, idleThresh
 		serviceName:        serviceName,
 		idleThresholdMins:  idleThresholdMins,
 		lookbackPeriodMins: lookbackPeriodMins,
+		logger:             log,
 	}, nil
 }
 
@@ -100,6 +120,7 @@ func NewHandlerWithClients(ecsClient ECSClient, cloudWatchClient CloudWatchClien
 		serviceName:        serviceName,
 		idleThresholdMins:  idleThresholdMins,
 		lookbackPeriodMins: lookbackPeriodMins,
+		logger:             logger.New("info"),
 	}
 }
 
@@ -126,18 +147,34 @@ func (h *Handler) HandleRequest(ctx context.Context, request SleepRequest) (*Sle
 		lookbackPeriodMins = request.LookbackPeriodMins
 	}
 
+	h.logger.Info("Processing sleep request", map[string]interface{}{
+		"clusterName":        clusterName,
+		"serviceName":        serviceName,
+		"idleThresholdMins":  idleThresholdMins,
+		"lookbackPeriodMins": lookbackPeriodMins,
+	})
+
 	// Step 1: Check current service state
 	describeInput := &ecs.DescribeServicesInput{
 		Cluster:  aws.String(clusterName),
 		Services: []string{serviceName},
 	}
 
+	h.logger.Debug("Describing ECS service state")
 	describeOutput, err := h.ecsClient.DescribeServices(ctx, describeInput)
 	if err != nil {
+		h.logger.Error("Failed to describe ECS service", err, map[string]interface{}{
+			"clusterName": clusterName,
+			"serviceName": serviceName,
+		})
 		return nil, fmt.Errorf("failed to describe ECS service: %w", err)
 	}
 
 	if len(describeOutput.Services) == 0 {
+		h.logger.Error("ECS service not found", nil, map[string]interface{}{
+			"clusterName": clusterName,
+			"serviceName": serviceName,
+		})
 		return nil, fmt.Errorf("service %s not found in cluster %s", serviceName, clusterName)
 	}
 
@@ -145,8 +182,14 @@ func (h *Handler) HandleRequest(ctx context.Context, request SleepRequest) (*Sle
 	desiredCount := service.DesiredCount
 	runningCount := service.RunningCount
 
+	h.logger.Debug("Current service state", map[string]interface{}{
+		"desiredCount": desiredCount,
+		"runningCount": runningCount,
+	})
+
 	// Step 2: If service is already stopped, no action needed
 	if desiredCount == 0 {
+		h.logger.Info("Service is already stopped, no action needed")
 		return &SleepResponse{
 			Action:       "no_change",
 			DesiredCount: 0,
@@ -156,12 +199,20 @@ func (h *Handler) HandleRequest(ctx context.Context, request SleepRequest) (*Sle
 	}
 
 	// Step 3: Query CloudWatch metrics
+	h.logger.Debug("Querying CloudWatch metrics", map[string]interface{}{
+		"lookbackPeriodMins": lookbackPeriodMins,
+	})
+
 	now := time.Now()
 	startTime := now.Add(-time.Duration(lookbackPeriodMins) * time.Minute)
 	endTime := now
 
 	avgActiveConnections, lastActivityTime, err := h.getMetrics(ctx, startTime, endTime)
 	if err != nil {
+		h.logger.Error("Failed to get CloudWatch metrics", err, map[string]interface{}{
+			"startTime": startTime,
+			"endTime":   endTime,
+		})
 		return nil, fmt.Errorf("failed to get CloudWatch metrics: %w", err)
 	}
 
@@ -171,12 +222,23 @@ func (h *Handler) HandleRequest(ctx context.Context, request SleepRequest) (*Sle
 		idleDurationSeconds = int64(now.Sub(lastActivityTime).Seconds())
 	}
 
+	h.logger.Debug("Metrics analysis", map[string]interface{}{
+		"avgActiveConnections": avgActiveConnections,
+		"idleDurationSeconds":  idleDurationSeconds,
+		"lastActivityTime":     lastActivityTime,
+	})
+
 	// Step 5: Check if service is idle
 	idleThresholdSeconds := int64(idleThresholdMins * 60)
 	isIdle := avgActiveConnections <= 0 && idleDurationSeconds >= idleThresholdSeconds
 
 	// Step 6: If idle and running, scale down
 	if isIdle {
+		h.logger.Info("Service is idle, initiating scale down", map[string]interface{}{
+			"idleDurationSeconds":  idleDurationSeconds,
+			"idleThresholdSeconds": idleThresholdSeconds,
+			"avgActiveConnections": avgActiveConnections,
+		})
 		updateInput := &ecs.UpdateServiceInput{
 			Cluster:      aws.String(clusterName),
 			Service:      aws.String(serviceName),
@@ -185,8 +247,16 @@ func (h *Handler) HandleRequest(ctx context.Context, request SleepRequest) (*Sle
 
 		_, err = h.ecsClient.UpdateService(ctx, updateInput)
 		if err != nil {
+			h.logger.Error("Failed to update ECS service", err, map[string]interface{}{
+				"clusterName": clusterName,
+				"serviceName": serviceName,
+			})
 			return nil, fmt.Errorf("failed to update ECS service: %w", err)
 		}
+
+		h.logger.Info("Service scaled down successfully", map[string]interface{}{
+			"idleDurationSeconds": idleDurationSeconds,
+		})
 
 		return &SleepResponse{
 			Action:               "scaled_down",
@@ -199,6 +269,13 @@ func (h *Handler) HandleRequest(ctx context.Context, request SleepRequest) (*Sle
 	}
 
 	// Step 7: Service is active, no action
+	h.logger.Info("Service is active, no action needed", map[string]interface{}{
+		"avgActiveConnections": avgActiveConnections,
+		"idleDurationSeconds":  idleDurationSeconds,
+		"desiredCount":         desiredCount,
+		"runningCount":         runningCount,
+	})
+
 	return &SleepResponse{
 		Action:               "no_change",
 		DesiredCount:         desiredCount,
