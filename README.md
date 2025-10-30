@@ -53,6 +53,20 @@ curl -x http://127.0.0.1:8080 http://example.com
 - **[Docker](docs/docker.md)** - Container builds and networking
 - **[AWS Fargate](docs/fargate.md)** - Cloud deployment guide
 - **[Lambda Functions](docs/lambda.md)** - Automated lifecycle management
+- **[Operational Runbook](docs/operational-runbook.md)** - Manual procedures and troubleshooting
+
+### Lambda Control Plane (Phase 2)
+
+**Automated lifecycle management with cost optimization:**
+
+The Lambda control plane provides serverless automation for Fargate:
+- **Wake Lambda:** Agent calls on startup → Fargate task starts in 30-60s
+- **Sleep Lambda:** Periodic scheduler → auto-stops server when idle
+- **Kill Lambda:** Graceful shutdown on agent exit or daily schedule
+
+**Cost impact:** $0.05/month (Lambda) + Fargate usage = **$0.55-$3.05/month** with auto-idle
+
+**Setup:** See [Lambda Functions Guide](docs/lambda.md) and [Fargate Integration](docs/fargate.md#lambda-control-plane-integration)
 
 ### Testing & Validation
 - **[Testing Summary](docs/TESTING_SUMMARY.md)** - Unit tests, coverage, and validation results

@@ -278,37 +278,171 @@ For most use cases, option 1 is sufficient.
 
 ## Lambda Control Plane Integration
 
-For automated lifecycle management with cost optimization, integrate with Lambda functions.
+For automated lifecycle management with cost optimization, integrate with Lambda functions to automatically wake/sleep/kill Fargate tasks based on demand.
 
-**Features:**
-- **Wake Lambda:** Agent calls on startup → sets ECS desired count to 1
-- **Sleep Lambda:** EventBridge scheduler → checks CloudWatch metrics → scales down if idle
-- **Kill Lambda:** Agent calls on shutdown OR daily scheduled shutdown
+### Overview
 
-**Prerequisites:**
-- Fargate infrastructure deployed (this guide or CloudFormation)
+**Architecture:**
+- **Wake Lambda:** Called by agent on startup → sets ECS service desired count to 1
+- **Sleep Lambda:** EventBridge scheduler (every 5 min by default) → analyzes CloudWatch metrics → scales down if idle
+- **Kill Lambda:** Called by agent on shutdown OR scheduled daily termination
+
+**Benefits:**
+- Automatic idle detection and cost savings (server stops when not in use)
+- On-demand startup (agent triggers wake, server starts within 90 seconds)
+- Graceful shutdown
+- Scheduled daily kill for resource cleanup
+
+### Prerequisites
+
+- Fargate infrastructure deployed (see steps 1-4 above)
+- Lambda stack deployed via CloudFormation (`lambda.yaml`)
 - Server configured to emit CloudWatch metrics
+- Agent configured with Lambda API endpoints
 
-**Configuration:**
+### Configuration
+
+**Step 1: Enable Metrics Emission**
 
 Server (`configs/server.yaml`):
 ```yaml
+# Enable CloudWatch metrics
 emit_metrics: true
-metrics_interval: "60s"
+metrics_interval: "60s"  # Emit every 60 seconds
 ```
 
-Agent (`configs/agent.local.yaml`):
+**Step 2: Update Fargate IAM Role**
+
+The Fargate task execution role must have `CloudWatch:PutMetricData` permission.
+
+Update your Fargate CloudFormation template or IAM policy:
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:PutMetricData"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+**Step 3: Configure Agent**
+
+Agent (`configs/agent.yaml`):
 ```yaml
-wake_api_endpoint: "https://xxx.execute-api.us-east-1.amazonaws.com/prod/wake"
-kill_api_endpoint: "https://xxx.execute-api.us-east-1.amazonaws.com/prod/kill"
-api_key: "your-api-key"
-connection_timeout: "90s"
-connection_retry_interval: "5s"
+lifecycle:
+  enabled: true
+  wake_api_endpoint: "https://xxx.execute-api.us-east-1.amazonaws.com/prod/wake"
+  kill_api_endpoint: "https://xxx.execute-api.us-east-1.amazonaws.com/prod/kill"
+  api_key: "${LAMBDA_API_KEY}"  # Set via environment variable
+  connection_timeout: "90s"      # Wait up to 90s for server to wake
+  connection_retry_interval: "5s" # Retry every 5s during wake
+  connection_max_retries: 20     # 20 * 5s = ~100s max wait
 ```
 
-**Full instructions:** See **[Lambda Functions Guide](lambda.md)**
+**Step 4: Deploy Lambda Stack**
 
-**Cost impact:** Lambda < $0.05/month + Fargate usage = $0.55-$3.05/month total
+```powershell
+# Deploy Lambda functions and API Gateway
+./scripts/deploy-fluidity.ps1 lambda
+```
+
+This creates:
+- Lambda functions (Wake, Sleep, Kill)
+- API Gateway with authentication
+- EventBridge scheduler for Sleep Lambda (5 min interval)
+- CloudWatch alarms for Lambda errors
+- SNS topic for email alerts
+
+### Lifecycle Flow
+
+**Agent Startup:**
+1. Agent calls Wake Lambda via API Gateway
+2. Wake Lambda sets ECS service desired count to 1
+3. Fargate task starts (30-60 seconds)
+4. Agent retries connection every 5 seconds (timeout: 90s)
+5. Server starts and emits metrics to CloudWatch
+6. Agent connects and begins tunneling
+
+**Idle Detection:**
+1. EventBridge triggers Sleep Lambda every 5 minutes
+2. Sleep Lambda queries CloudWatch metrics for last activity
+3. If idle > 10 minutes (configurable), scales down to 0
+4. Fargate task terminates
+5. Billing pauses
+
+**Agent Shutdown:**
+1. Agent calls Kill Lambda via API Gateway
+2. Kill Lambda performs graceful shutdown
+3. Fargate task terminates cleanly
+
+**Scheduled Kill:**
+1. Kill Lambda runs on daily schedule (default: 11 PM UTC)
+2. Terminates any running tasks regardless of activity
+3. Useful for resource cleanup and cost control
+
+### Monitoring
+
+**CloudWatch Dashboard:**
+View Lambda invocations, errors, duration, and Fargate metrics at a glance.
+
+**CloudWatch Alarms:**
+- **WakeLambdaErrorAlarm**: Notifies if Wake fails (SNS email)
+- **SleepLambdaErrorAlarm**: Notifies if Sleep fails (SNS email)
+- **KillLambdaErrorAlarm**: Notifies if Kill fails (SNS email)
+
+**Logs:**
+- Lambda logs: CloudWatch Logs → `/aws/lambda/fluidity-wake`, etc.
+- Fargate logs: CloudWatch Logs → `/fluidity/server`
+
+### Cost Optimization
+
+**Lambda costs:** < $0.05/month (millions of invocations free tier, then $0.20 per million)
+
+**Total monthly cost (with Lambda control plane):**
+- 2 hours/day usage: ~$0.55/month
+- 8 hours/day usage: ~$3.05/month
+- 24/7 usage: ~$9.05/month
+- With auto-idle: Saves 50-90% depending on usage pattern
+
+**Example:** 2 hours/day with auto-idle (avg 30 min idle per session) = ~$0.30/month
+
+### Troubleshooting
+
+**Wake Lambda fails:**
+- Check IAM role has `ecs:UpdateService` permission
+- Verify API key is correct
+- Check CloudWatch Logs for Lambda errors
+- Ensure cluster/service names match Lambda configuration
+
+**Sleep Lambda never fires:**
+- Verify EventBridge rule is enabled
+- Check EventBridge target Lambda is active
+- Monitor CloudWatch Logs for Sleep Lambda
+- Verify server is emitting metrics (`emit_metrics: true`)
+
+**Agent can't connect after wake:**
+- Confirm server is starting (check ECS task status)
+- Verify agent connection timeout is >= 60s
+- Check CloudWatch Logs (`/fluidity/server`) for startup errors
+- Verify security group allows port 8443
+
+**Metrics not appearing in CloudWatch:**
+- Verify `emit_metrics: true` in server config
+- Check Fargate IAM role has `cloudwatch:PutMetricData` permission
+- Confirm server is running and healthy
+- Check `/fluidity/server` logs for metric emission errors
+
+### Full Documentation
+
+**See:** **[Lambda Functions Guide](lambda.md)** - Complete Lambda setup, configuration, and troubleshooting
+
+**See:** **[Infrastructure as Code](infrastructure.md)** - CloudFormation template details
 
 ---
 

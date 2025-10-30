@@ -125,9 +125,9 @@ This document outlines the development roadmap, organized by completion status a
 - [x] Update architecture.md with Lambda design
 - [x] Update deployment.md with Lambda guide
 - [x] Update plan.md with tasks
-- [ ] Update fargate.md with Lambda integration
-- [ ] Update README.md with Lambda overview
-- [ ] Operational runbook (manual wake/sleep/kill, troubleshooting)
+- [x] Update fargate.md with Lambda integration
+- [x] Update README.md with Lambda overview
+- [x] Operational runbook (manual wake/sleep/kill, troubleshooting)
 
 ---
 
