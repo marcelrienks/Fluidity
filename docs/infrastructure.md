@@ -1,108 +1,213 @@
-# Infrastructure as Code
+# Infrastructure as Code# Infrastructure as Code
 
-Complete guide to deploying and managing Fluidity using AWS CloudFormation.
 
-## Overview
 
-Fluidity uses AWS CloudFormation for infrastructure management with automated deployment scripts, environment separation (dev/prod), stack protection policies, and drift detection.
+Deploy and manage Fluidity using AWS CloudFormation.Complete guide to deploying and managing Fluidity using AWS CloudFormation.
 
-**Two main stacks:**
+
+
+## Overview## Overview
+
+
+
+**Two CloudFormation stacks:**Fluidity uses AWS CloudFormation for infrastructure management with automated deployment scripts, environment separation (dev/prod), stack protection policies, and drift detection.
+
+- **Fargate Stack**: ECS cluster, service, task definition
+
+- **Lambda Stack**: Control plane (Wake/Sleep/Kill), API Gateway, EventBridge**Two main stacks:**
+
 - **Fargate Stack**: ECS cluster, service, and task definition
-- **Lambda Stack**: Control plane (Wake/Sleep/Kill), API Gateway, EventBridge
 
-## Quick Start
+## Quick Deploy- **Lambda Stack**: Control plane (Wake/Sleep/Kill), API Gateway, EventBridge
 
-### 1. Build and Push Docker Image
 
-```bash
-make -f Makefile.linux docker-build-server
-docker tag fluidity-server:latest YOUR_ACCOUNT_ID.dkr.ecr.YOUR_REGION.amazonaws.com/fluidity-server:latest
-aws ecr get-login-password --region YOUR_REGION | docker login --username AWS --password-stdin YOUR_ACCOUNT_ID.dkr.ecr.YOUR_REGION.amazonaws.com
+
+### 1. Push Image to ECR## Quick Start
+
+
+
+```bash### 1. Build and Push Docker Image
+
+make -f Makefile.<platform> docker-build-server
+
+docker tag fluidity-server:latest <account-id>.dkr.ecr.us-east-1.amazonaws.com/fluidity-server:latest```bash
+
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <account-id>.dkr.ecr.us-east-1.amazonaws.commake -f Makefile.linux docker-build-server
+
+docker push <account-id>.dkr.ecr.us-east-1.amazonaws.com/fluidity-server:latestdocker tag fluidity-server:latest YOUR_ACCOUNT_ID.dkr.ecr.YOUR_REGION.amazonaws.com/fluidity-server:latest
+
+```aws ecr get-login-password --region YOUR_REGION | docker login --username AWS --password-stdin YOUR_ACCOUNT_ID.dkr.ecr.YOUR_REGION.amazonaws.com
+
 docker push YOUR_ACCOUNT_ID.dkr.ecr.YOUR_REGION.amazonaws.com/fluidity-server:latest
-```
 
-### 2. Configure Parameters
+### 2. Configure Parameters```
 
-Edit `deployments/cloudformation/params.json`:
-- Replace `YOUR_ACCOUNT_ID`, `YOUR_REGION`
+
+
+Edit `deployments/cloudformation/params.json`:### 2. Configure Parameters
+
 - Set `VpcId` and `PublicSubnets`
-- Set `AllowedIngressCidr` to your public IP (`x.x.x.x/32`)
+
+- Set `AllowedIngressCidr` to your IP (`x.x.x.x/32`)Edit `deployments/cloudformation/params.json`:
+
+- Update `ContainerImage` with ECR URI- Replace `YOUR_ACCOUNT_ID`, `YOUR_REGION`
+
+- Set `VpcId` and `PublicSubnets`
+
+### 3. Deploy- Set `AllowedIngressCidr` to your public IP (`x.x.x.x/32`)
+
 - Update `ContainerImage` with your ECR URI
 
-### 3. Deploy Infrastructure
-
-```powershell
-cd scripts
-./deploy-fluidity.ps1 -Environment prod -Action deploy
-```
-
-Or with Bash:
 ```bash
-cd scripts
-./deploy-fluidity.sh -e prod -a deploy
-```
 
-## File Structure
+cd scripts### 3. Deploy Infrastructure
 
-```
-deployments/cloudformation/
-├── fargate.yaml              # ECS Fargate cluster and service
-├── lambda.yaml               # Lambda control plane infrastructure
-├── params-dev.json           # Development parameters
-├── params-prod.json          # Production parameters
-├── stack-policy.json         # Stack deletion protection
-└── README.md
+./deploy-fluidity.sh -e prod -a deploy              # Linux/macOS
 
-scripts/
-├── deploy-fluidity.ps1       # PowerShell deployment script
-└── deploy-fluidity.sh        # Bash deployment script
-```
+.\deploy-fluidity.ps1 -Environment prod -Action deploy  # Windows```powershell
 
-## Configuration
+```cd scripts
 
-### Parameters Reference
-
-| Parameter | Purpose | Dev Value | Prod Value |
-|-----------|---------|-----------|-----------|
-| `ClusterName` | ECS cluster name | `fluidity-dev` | `fluidity-prod` |
-| `ServiceName` | ECS service name | `fluidity-server-dev` | `fluidity-server-prod` |
-| `ContainerImage` | ECR image URI | Required | Required |
-| `VpcId` | VPC for deployment | Required | Required |
-| `PublicSubnets` | Subnets for tasks | Required | Required |
-| `AllowedIngressCidr` | IP whitelist | Required | Required |
-| `Cpu` | Task CPU | 256 | 256 |
-| `Memory` | Task memory (MB) | 512 | 512 |
-| `DesiredCount` | Running tasks | 0 | 0 |
-| `LogRetentionDays` | Log retention | 7 | 30 |
-| `IdleThresholdMinutes` | Idle timeout | 5 | 15 |
-| `SleepCheckIntervalMinutes` | Check frequency | 2 | 5 |
-
-**Environment Differences:**
-- **Dev**: Optimized for testing (faster iterations, shorter timeouts)
-- **Prod**: Conservative settings (longer timeouts, more logs)
-
-## Deployment Operations
-
-### Deploy Infrastructure
-
-```powershell
 ./deploy-fluidity.ps1 -Environment prod -Action deploy
+
+## Manage```
+
+
+
+**Start server:**Or with Bash:
+
+```bash```bash
+
+aws ecs update-service --cluster fluidity-prod --service fluidity-server-prod --desired-count 1cd scripts
+
+```./deploy-fluidity.sh -e prod -a deploy
+
 ```
+
+**Stop server:**
+
+```bash## File Structure
+
+aws ecs update-service --cluster fluidity-prod --service fluidity-server-prod --desired-count 0
+
+``````
+
+deployments/cloudformation/
+
+**Get public IP:**├── fargate.yaml              # ECS Fargate cluster and service
+
+```bash├── lambda.yaml               # Lambda control plane infrastructure
+
+# Get task ARN, then ENI, then IP (see Fargate Guide)├── params-dev.json           # Development parameters
+
+```├── params-prod.json          # Production parameters
+
+├── stack-policy.json         # Stack deletion protection
+
+**View status:**└── README.md
+
+```bash
+
+cd scriptsscripts/
+
+./deploy-fluidity.sh -e prod -a status├── deploy-fluidity.ps1       # PowerShell deployment script
+
+```└── deploy-fluidity.sh        # Bash deployment script
+
+```
+
+**View outputs:**
+
+```bash## Configuration
+
+./deploy-fluidity.sh -e prod -a outputs
+
+```### Parameters Reference
+
+
+
+**Delete:**| Parameter | Purpose | Dev Value | Prod Value |
+
+```bash|-----------|---------|-----------|-----------|
+
+./deploy-fluidity.sh -e prod -a delete| `ClusterName` | ECS cluster name | `fluidity-dev` | `fluidity-prod` |
+
+```| `ServiceName` | ECS service name | `fluidity-server-dev` | `fluidity-server-prod` |
+
+| `ContainerImage` | ECR image URI | Required | Required |
+
+## Monitoring| `VpcId` | VPC for deployment | Required | Required |
+
+| `PublicSubnets` | Subnets for tasks | Required | Required |
+
+**CloudWatch Logs:**| `AllowedIngressCidr` | IP whitelist | Required | Required |
+
+```bash| `Cpu` | Task CPU | 256 | 256 |
+
+aws logs tail /ecs/fluidity/server --follow| `Memory` | Task memory (MB) | 512 | 512 |
+
+aws logs tail /aws/lambda/fluidity-wake --follow| `DesiredCount` | Running tasks | 0 | 0 |
+
+```| `LogRetentionDays` | Log retention | 7 | 30 |
+
+| `IdleThresholdMinutes` | Idle timeout | 5 | 15 |
+
+**CloudWatch Metrics:**| `SleepCheckIntervalMinutes` | Check frequency | 2 | 5 |
+
+- `Fluidity/ActiveConnections`
+
+- `Fluidity/LastActivityEpochSeconds`**Environment Differences:**
+
+- **Dev**: Optimized for testing (faster iterations, shorter timeouts)
+
+**CloudWatch Dashboard:** Auto-created with Lambda metrics- **Prod**: Conservative settings (longer timeouts, more logs)
+
+
+
+## Drift Detection## Deployment Operations
+
+
+
+Check for manual changes:### Deploy Infrastructure
+
+```bash
+
+./deploy-fluidity.sh -e prod -a status```powershell
+
+```./deploy-fluidity.ps1 -Environment prod -Action deploy
+
+```
+
+Fix drift by redeploying.
 
 Creates or updates both stacks and applies protection policies.
 
+## Cost Estimation
+
 ### Check Status
 
-```powershell
-./deploy-fluidity.ps1 -Environment prod -Action status
-```
+| Scenario | Fargate | Lambda | Total/Month |
+
+|----------|---------|--------|-------------|```powershell
+
+| 2h/day | $0.27 | $0.05 | **$0.32** |./deploy-fluidity.ps1 -Environment prod -Action status
+
+| 8h/day | $1.08 | $0.05 | **$1.13** |```
+
+| 24/7 | $8.64 | $0.05 | **$8.69** |
 
 Displays stack status and performs drift detection to identify manual changes.
 
+## Related Documentation
+
 ### View Outputs
 
-```powershell
-./deploy-fluidity.ps1 -Environment prod -Action outputs
+- [Deployment Guide](deployment.md) - All options
+
+- [Fargate Guide](fargate.md) - ECS details  ```powershell
+
+- [Lambda Functions](lambda.md) - Control plane./deploy-fluidity.ps1 -Environment prod -Action outputs
+
 ```
 
 Shows all stack outputs including API endpoints and ARNs.

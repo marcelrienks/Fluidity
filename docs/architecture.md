@@ -1,231 +1,459 @@
-# Architecture Design
+# Architecture# Architecture Design
 
-**Status**: Phase 1 Complete | Phase 2 In Progress
 
----
 
-## System Overview
+Fluidity uses a client-server architecture with mTLS authentication and Lambda-based lifecycle management.**Status**: Phase 1 Complete | Phase 2 In Progress
 
-Fluidity uses a client-server architecture with mTLS authentication and optional Lambda-based lifecycle management.
 
-```
+
+## System Overview---
+
+
+
+```## System Overview
+
 ┌─────────────────┐                    ┌──────────────────────┐
-│  Local Network  │                    │     AWS Cloud        │
+
+│  Local Network  │                    │     AWS Cloud        │Fluidity uses a client-server architecture with mTLS authentication and optional Lambda-based lifecycle management.
+
 │                 │                    │                      │
-│ ┌─────────────┐ │                    │ ┌─────────────────┐  │
-│ │   Browser   │ │                    │ │Target Websites  │  │
-│ └──────┬──────┘ │                    │ └────────▲────────┘  │
-│        │ Proxy  │                    │          │           │
-│ ┌──────▼──────┐ │   mTLS Tunnel      │ ┌────────┴────────┐  │
-│ │Tunnel Agent │ │◄──────────────────►│ │ Tunnel Server   │  │
-│ │  (Go/Docker)│ │                    │ │(ECS Fargate/Go) │  │
-│ │             │ │                    │ │                 │  │
-│ │•Wake on start│ │                    │ │•CloudWatch      │  │
+
+│ ┌─────────────┐ │                    │ ┌─────────────────┐  │```
+
+│ │   Browser   │ │                    │ │Target Websites  │  │┌─────────────────┐                    ┌──────────────────────┐
+
+│ └──────┬──────┘ │                    │ └────────▲────────┘  ││  Local Network  │                    │     AWS Cloud        │
+
+│        │ Proxy  │                    │          │           ││                 │                    │                      │
+
+│ ┌──────▼──────┐ │   mTLS Tunnel      │ ┌────────┴────────┐  ││ ┌─────────────┐ │                    │ ┌─────────────────┐  │
+
+│ │Tunnel Agent │ │◄──────────────────►│ │ Tunnel Server   │  ││ │   Browser   │ │                    │ │Target Websites  │  │
+
+│ │  (Go/Docker)│ │                    │ │(ECS Fargate/Go) │  ││ └──────┬──────┘ │                    │ └────────▲────────┘  │
+
+│ └─────────────┘ │                    │ └─────────────────┘  ││        │ Proxy  │                    │          │           │
+
+│        │ HTTPS  │                    │          │           ││ ┌──────▼──────┐ │   mTLS Tunnel      │ ┌────────┴────────┐  │
+
+│        └────────┼────────────────────┼►│ Lambda Control  │  ││ │Tunnel Agent │ │◄──────────────────►│ │ Tunnel Server   │  │
+
+│                 │                    │ │ (Wake/Sleep)    │  ││ │  (Go/Docker)│ │                    │ │(ECS Fargate/Go) │  │
+
+└─────────────────┘                    └──────────────────────┘│ │             │ │                    │ │                 │  │
+
+```│ │•Wake on start│ │                    │ │•CloudWatch      │  │
+
 │ │•Kill on stop│ │                    │ │ metrics         │  │
-│ └─────────────┘ │                    │ └─────────────────┘  │
+
+## Components│ └─────────────┘ │                    │ └─────────────────┘  │
+
 │        │        │                    │          │           │
-│        │ HTTPS  │                    │ ┌────────▼────────┐  │
-│        └────────┼────────────────────┼►│ Lambda Control  │  │
-│                 │                    │ │ Plane (Wake/    │  │
-│                 │                    │ │ Sleep/Kill)     │  │
-└─────────────────┘                    └──────────────────────┘
+
+### Tunnel Agent (Local)│        │ HTTPS  │                    │ ┌────────▼────────┐  │
+
+- HTTP proxy server (port 8080)│        └────────┼────────────────────┼►│ Lambda Control  │  │
+
+- mTLS client connecting to server│                 │                    │ │ Plane (Wake/    │  │
+
+- Calls Wake Lambda on startup, Kill on shutdown│                 │                    │ │ Sleep/Kill)     │  │
+
+- Auto-reconnects on connection loss└─────────────────┘                    └──────────────────────┘
+
 ```
 
-### Components
+### Tunnel Server (Cloud)
 
-**Tunnel Agent** (Local)
-- HTTP proxy server (port 8080)
+- mTLS server (port 8443)### Components
+
+- Forwards requests to target websites
+
+- Publishes CloudWatch metrics**Tunnel Agent** (Local)
+
+- Handles concurrent connections- HTTP proxy server (port 8080)
+
 - mTLS client to server
-- Lifecycle integration (Wake/Kill Lambda calls)
-- Automatic reconnection
 
-**Tunnel Server** (Cloud)
-- mTLS server (port 8443)
-- HTTP client for target websites
-- CloudWatch metrics emission
-- Concurrent connection handling
+### Lambda Control Plane (AWS)- Lifecycle integration (Wake/Kill Lambda calls)
 
-**Lambda Control Plane** (AWS)
-- **Wake**: Starts ECS service (DesiredCount=1)
+- **Wake**: Starts server (DesiredCount=1)- Automatic reconnection
+
 - **Sleep**: Auto-scales down when idle
-- **Kill**: Immediate shutdown
-- See [Lambda Functions](lambda.md) for details
 
----
+- **Kill**: Immediate shutdown**Tunnel Server** (Cloud)
+
+- mTLS server (port 8443)
+
+See [Lambda Functions](lambda.md) for details.- HTTP client for target websites
+
+- CloudWatch metrics emission
+
+## Protocol- Concurrent connection handling
+
+
+
+JSON messages over TLS 1.3:**Lambda Control Plane** (AWS)
+
+- **Wake**: Starts ECS service (DesiredCount=1)
+
+```go- **Sleep**: Auto-scales down when idle
+
+type Envelope struct {- **Kill**: Immediate shutdown
+
+    Type    string      `json:"type"`- See [Lambda Functions](lambda.md) for details
+
+    Payload interface{} `json:"payload"`
+
+}---
+
+```
 
 ## Communication Protocol
 
-### Protocol Envelope
+**Message Types**:
 
-JSON-based message framing over TLS 1.3:
+- `Request/Response` - HTTP tunneling### Protocol Envelope
+
+- `ConnectRequest/ConnectAck/ConnectData` - HTTPS CONNECT
+
+- `WebSocketOpen/WebSocketMessage/WebSocketClose` - WebSocketJSON-based message framing over TLS 1.3:
+
+
+
+## Security```go
+
+type Envelope struct {
+
+### mTLS Configuration    Type    string      `json:"type"`    // "request", "response", "connect", etc.
+
+    Payload interface{} `json:"payload"`
+
+**Certificate Chain**:}
+
+``````
+
+Private CA (self-signed)
+
+├── Server Certificate### Message Types
+
+└── Client Certificate
+
+```**HTTP Tunneling**:
+
+- `Request`: HTTP method, URL, headers, body
+
+**TLS Requirements**:- `Response`: Status code, headers, body
+
+- TLS 1.3 minimum
+
+- Mutual authentication required**HTTPS CONNECT**:
+
+- Certificate validation against private CA- `ConnectRequest`: Host for HTTPS tunnel
+
+- `ConnectAck`: Success/failure
+
+**Agent Config**:- `ConnectData`: Bidirectional stream data
 
 ```go
-type Envelope struct {
-    Type    string      `json:"type"`    // "request", "response", "connect", etc.
-    Payload interface{} `json:"payload"`
-}
+
+&tls.Config{**WebSocket**:
+
+    Certificates: []tls.Certificate{clientCert},- `WebSocketOpen`: Initiate WebSocket connection
+
+    RootCAs:      caCertPool,- `WebSocketAck`: Connection confirmed
+
+    MinVersion:   tls.VersionTLS13,- `WebSocketMessage`: Frame data
+
+}- `WebSocketClose`: Close connection
+
 ```
-
-### Message Types
-
-**HTTP Tunneling**:
-- `Request`: HTTP method, URL, headers, body
-- `Response`: Status code, headers, body
-
-**HTTPS CONNECT**:
-- `ConnectRequest`: Host for HTTPS tunnel
-- `ConnectAck`: Success/failure
-- `ConnectData`: Bidirectional stream data
-
-**WebSocket**:
-- `WebSocketOpen`: Initiate WebSocket connection
-- `WebSocketAck`: Connection confirmed
-- `WebSocketMessage`: Frame data
-- `WebSocketClose`: Close connection
 
 ---
 
-## Security Architecture
+**Server Config**:
 
-### mTLS Implementation
+```go## Security Architecture
 
-**Certificate Chain**:
-```
-Private CA (Self-signed)
-├── Server Certificate (TLS server auth)
+&tls.Config{
+
+    Certificates: []tls.Certificate{serverCert},### mTLS Implementation
+
+    ClientAuth:   tls.RequireAndVerifyClientCert,
+
+    ClientCAs:    caCertPool,**Certificate Chain**:
+
+    MinVersion:   tls.VersionTLS13,```
+
+}Private CA (Self-signed)
+
+```├── Server Certificate (TLS server auth)
+
 └── Client Certificate (TLS client auth)
-```
 
-**Configuration**:
-- TLS 1.3 minimum
-- Mutual authentication required
-- Certificate validation against private CA
+## Project Structure```
+
+
+
+```**Configuration**:
+
+cmd/core/- TLS 1.3 minimum
+
+├── agent/main.go          # Agent entry- Mutual authentication required
+
+└── server/main.go         # Server entry- Certificate validation against private CA
+
 - No InsecureSkipVerify
 
-**Agent TLS Config**:
-```go
-&tls.Config{
+cmd/lambdas/
+
+├── wake/main.go**Agent TLS Config**:
+
+├── sleep/main.go```go
+
+└── kill/main.go&tls.Config{
+
     Certificates: []tls.Certificate{clientCert},
-    RootCAs:      caCertPool,
-    MinVersion:   tls.VersionTLS13,
-}
+
+internal/core/    RootCAs:      caCertPool,
+
+├── agent/                 # Proxy + tunnel client    MinVersion:   tls.VersionTLS13,
+
+└── server/                # mTLS server + HTTP forwarder}
+
 ```
 
-**Server TLS Config**:
-```go
-&tls.Config{
-    Certificates: []tls.Certificate{serverCert},
+internal/shared/
+
+├── protocol/              # Message definitions**Server TLS Config**:
+
+├── tls/                   # mTLS utilities```go
+
+├── circuitbreaker/        # Failure protection&tls.Config{
+
+└── retry/                 # Retry logic    Certificates: []tls.Certificate{serverCert},
+
     ClientAuth:   tls.RequireAndVerifyClientCert,
-    ClientCAs:    caCertPool,
-    MinVersion:   tls.VersionTLS13,
-}
+
+deployments/    ClientCAs:    caCertPool,
+
+├── agent/Dockerfile    MinVersion:   tls.VersionTLS13,
+
+├── server/Dockerfile}
+
+└── cloudformation/        # Infrastructure as Code```
+
 ```
 
 ---
+
+## Configuration
 
 ## Project Structure
 
-```
-fluidity/
-├── cmd/
-│   ├── core/
-│   │   ├── agent/main.go          # Agent entry point
-│   │   └── server/main.go         # Server entry point
-│   └── lambdas/
-│       ├── wake/main.go           # Wake Lambda
-│       ├── sleep/main.go          # Sleep Lambda
+### Agent (`agent.yaml`)
+
+```yaml```
+
+server_ip: "3.24.56.78"fluidity/
+
+server_port: 8443├── cmd/
+
+local_proxy_port: 8080│   ├── core/
+
+cert_file: "./certs/client.crt"│   │   ├── agent/main.go          # Agent entry point
+
+key_file: "./certs/client.key"│   │   └── server/main.go         # Server entry point
+
+ca_cert_file: "./certs/ca.crt"│   └── lambdas/
+
+log_level: "info"│       ├── wake/main.go           # Wake Lambda
+
+```│       ├── sleep/main.go          # Sleep Lambda
+
 │       └── kill/main.go           # Kill Lambda
-├── internal/
-│   ├── core/
-│   │   ├── agent/                 # Agent logic
-│   │   └── server/                # Server logic
-│   ├── lambdas/                   # Lambda implementations
-│   └── shared/                    # Shared libraries
-│       ├── protocol/              # Protocol definitions
-│       ├── tls/                   # mTLS utilities
-│       ├── config/                # Configuration
-│       ├── logging/               # Logging
-│       ├── circuitbreaker/        # Circuit breaker pattern
+
+### Server (`server.yaml`)├── internal/
+
+```yaml│   ├── core/
+
+listen_addr: "0.0.0.0"│   │   ├── agent/                 # Agent logic
+
+listen_port: 8443│   │   └── server/                # Server logic
+
+cert_file: "/root/certs/server.crt"│   ├── lambdas/                   # Lambda implementations
+
+key_file: "/root/certs/server.key"│   └── shared/                    # Shared libraries
+
+ca_cert_file: "/root/certs/ca.crt"│       ├── protocol/              # Protocol definitions
+
+log_level: "info"│       ├── tls/                   # mTLS utilities
+
+max_connections: 100│       ├── config/                # Configuration
+
+emit_metrics: true│       ├── logging/               # Logging
+
+```│       ├── circuitbreaker/        # Circuit breaker pattern
+
 │       └── retry/                 # Retry logic
-├── deployments/
+
+## Reliability Patterns├── deployments/
+
 │   ├── agent/Dockerfile
-│   ├── server/Dockerfile
-│   └── cloudformation/
-│       ├── fargate.yaml           # ECS infrastructure
-│       └── lambda.yaml            # Lambda control plane
+
+### Circuit Breaker│   ├── server/Dockerfile
+
+- Failure threshold: 5 consecutive failures│   └── cloudformation/
+
+- Timeout: 30 seconds│       ├── fargate.yaml           # ECS infrastructure
+
+- Protects against cascading failures│       └── lambda.yaml            # Lambda control plane
+
 ├── configs/                       # YAML configurations
-├── certs/                         # TLS certificates
-└── scripts/                       # Build & test scripts
-```
+
+### Retry Logic├── certs/                         # TLS certificates
+
+- Max attempts: 3└── scripts/                       # Build & test scripts
+
+- Exponential backoff: 1s, 2s, 4s```
+
+- Max delay: 10s
 
 ---
 
-## Agent Architecture
+### Auto-Reconnection
+
+- Retry interval: 5s## Agent Architecture
+
+- Max duration: 90s (after wake)
 
 ### Core Responsibilities
 
+## Deployment Options
+
 1. **HTTP Proxy Server**: Accept browser/app requests on localhost:8080
-2. **Tunnel Client**: Forward requests via mTLS to server
-3. **Lifecycle Management**: Call Wake Lambda on startup, Kill on shutdown
-4. **Connection Recovery**: Retry with exponential backoff
 
-### Key Components
+### Local Development2. **Tunnel Client**: Forward requests via mTLS to server
 
-**Proxy Server** (`internal/core/agent/proxy.go`):
+```3. **Lifecycle Management**: Call Wake Lambda on startup, Kill on shutdown
+
+Host Machine4. **Connection Recovery**: Retry with exponential backoff
+
+├── Server binary (localhost:8443)
+
+├── Agent binary (localhost:8080)### Key Components
+
+└── Certs (./certs/)
+
+```**Proxy Server** (`internal/core/agent/proxy.go`):
+
 - Handles HTTP and HTTPS CONNECT requests
-- Converts HTTP requests to protocol envelopes
-- Returns responses to local clients
 
-**Tunnel Connection** (`internal/core/agent/agent.go`):
-- Establishes mTLS connection to server
+### Docker- Converts HTTP requests to protocol envelopes
+
+```- Returns responses to local clients
+
+├── fluidity-server container (~44MB)
+
+└── fluidity-agent container (~44MB)**Tunnel Connection** (`internal/core/agent/agent.go`):
+
+```- Establishes mTLS connection to server
+
 - Manages request/response correlation
-- Handles reconnection logic
 
-**Lifecycle Client** (planned):
-- Calls Wake Lambda via API Gateway on startup
-- Retries connection for configured duration (default 90s)
-- Calls Kill Lambda on graceful shutdown
+### AWS Fargate- Handles reconnection logic
+
+```
+
+ECS Cluster → Service → Task (0.25 vCPU, 512MB)**Lifecycle Client** (planned):
+
+├── Public IP (dynamic)- Calls Wake Lambda via API Gateway on startup
+
+├── Security Group (port 8443)- Retries connection for configured duration (default 90s)
+
+└── CloudWatch Logs- Calls Kill Lambda on graceful shutdown
+
+```
 
 ### Configuration
 
+See [Deployment Guide](deployment.md) for setup instructions.
+
 ```yaml
-# agent.yaml
+
+## Monitoring# agent.yaml
+
 server_ip: "3.24.56.78"
-server_port: 8443
-local_proxy_port: 8080
-cert_file: "./certs/client.crt"
-key_file: "./certs/client.key"
+
+### Logsserver_port: 8443
+
+- Structured logging with logruslocal_proxy_port: 8080
+
+- Connection events and errorscert_file: "./certs/client.crt"
+
+- No sensitive data (no credentials, URLs, or POST bodies)key_file: "./certs/client.key"
+
 ca_cert_file: "./certs/ca.crt"
-log_level: "info"
-```
+
+### Metrics (CloudWatch)log_level: "info"
+
+- `ActiveConnections`: Current connection count```
+
+- `LastActivityEpochSeconds`: Unix timestamp
 
 ---
 
+Used by Sleep Lambda for idle detection.
+
 ## Server Architecture
+
+## Performance
 
 ### Core Responsibilities
 
-1. **mTLS Server**: Accept authenticated agent connections
-2. **HTTP Client**: Make requests to target websites
-3. **Response Relay**: Return website responses through tunnel
-4. **Metrics Emission**: Publish CloudWatch metrics (when enabled)
+### Resource Usage
 
-### Key Components
+**Agent**: ~20-50MB memory, <5% CPU  1. **mTLS Server**: Accept authenticated agent connections
+
+**Server**: 256 CPU units, 512 MB memory, 100 concurrent connections2. **HTTP Client**: Make requests to target websites
+
+3. **Response Relay**: Return website responses through tunnel
+
+### Optimizations4. **Metrics Emission**: Publish CloudWatch metrics (when enabled)
+
+- TLS session resumption
+
+- HTTP/2 for target requests### Key Components
+
+- Connection pooling
 
 **Tunnel Server** (`internal/core/server/server.go`):
-- Accepts mTLS connections on port 8443
+
+## Security Best Practices- Accepts mTLS connections on port 8443
+
 - Validates client certificates
-- Handles concurrent requests via goroutines
 
-**HTTP Client**:
-- Connection pooling for target requests
+1. **Certificates**: 2-year validity, secure CA key storage, regular rotation- Handles concurrent requests via goroutines
+
+2. **Network**: Restrict Security Group to known IPs, use private subnets
+
+3. **Access**: API Gateway authentication, IAM least-privilege**HTTP Client**:
+
+4. **Monitoring**: CloudWatch Logs, alarms for errors- Connection pooling for target requests
+
 - Circuit breaker for external failures
-- Retry logic with exponential backoff
 
-**Metrics Emitter** (planned):
-- Tracks active connections (atomic counter)
-- Records last activity timestamp
-- Emits CloudWatch metrics every 60s
+## Related Documentation- Retry logic with exponential backoff
+
+
+
+- [Deployment Guide](deployment.md) - Setup instructions**Metrics Emitter** (planned):
+
+- [Lambda Functions](lambda.md) - Control plane- Tracks active connections (atomic counter)
+
+- [Development Guide](development.md) - Local development- Records last activity timestamp
+
+- [Testing Guide](testing.md) - Test strategy- Emits CloudWatch metrics every 60s
+
 
 ### Configuration
 

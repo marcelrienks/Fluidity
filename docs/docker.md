@@ -1,134 +1,265 @@
-# Docker Build and Deployment Guide
+# Docker Guide# Docker Build and Deployment Guide
 
-Docker-specific build process, networking, and troubleshooting for Fluidity.
 
----
 
-## Build Process
+## Build ProcessDocker-specific build process, networking, and troubleshooting for Fluidity.
 
-### Simplified Single-Stage Build
 
-Fluidity compiles Go binaries **locally** and copies them into Alpine containers.
 
-```
+Fluidity uses single-stage Docker builds with pre-compiled binaries.---
+
+
+
+### Why Single-Stage?## Build Process
+
+
+
+1. **Corporate Firewall Bypass**: Multi-stage builds fail when Docker Hub is blocked### Simplified Single-Stage Build
+
+2. **Faster Builds**: ~2 seconds vs ~10+ seconds
+
+3. **Platform Independent**: Works on Windows, macOS, LinuxFluidity compiles Go binaries **locally** and copies them into Alpine containers.
+
+
+
+### Build Commands```
+
 Host Machine (Any OS)         Docker Container (Linux)
-─────────────────────         ────────────────────────
-Go source + modules      →    Pre-built static binary
-Static Linux binary      →    Alpine Linux (~5MB)
-                              curl utility (~3MB)
-                              Total: ~44MB
+
+```bash─────────────────────         ────────────────────────
+
+make -f Makefile.<platform> docker-build-serverGo source + modules      →    Pre-built static binary
+
+make -f Makefile.<platform> docker-build-agentStatic Linux binary      →    Alpine Linux (~5MB)
+
+# platform: win, macos, or linux                              curl utility (~3MB)
+
+```                              Total: ~44MB
+
 ```
 
-### Why This Approach?
+**Build flags:**
 
-**1. Corporate Firewall Bypass**
+```bash### Why This Approach?
 
-Multi-stage builds fail in corporate environments:
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0  # Static Linux binary
+
+```**1. Corporate Firewall Bypass**
+
+
+
+**Image sizes:** ~44MB each (21MB Alpine + 23MB binary)Multi-stage builds fail in corporate environments:
+
 - Docker Hub blocked (403 Forbidden)
-- HTTPS traffic intercepted
+
+## Dockerfile Structure- HTTPS traffic intercepted
+
 - Go module proxies unreachable
 
-Solution: Build locally before Docker starts (no network calls during build).
+```dockerfile
 
-**2. Faster Builds**
+FROM alpine/curl:latest        # ~8MB baseSolution: Build locally before Docker starts (no network calls during build).
 
-- Multi-stage: ~10+ seconds (download modules, compile)
+
+
+WORKDIR /app**2. Faster Builds**
+
+
+
+COPY build/fluidity-server .   # Pre-built binary- Multi-stage: ~10+ seconds (download modules, compile)
+
 - Single-stage: ~2 seconds (copy pre-built binary)
+
+RUN mkdir -p ./config ./certs
 
 **3. Platform Independence**
 
-Works identically on Windows, macOS, and Linux via cross-compilation.
-
-### Build Commands
-
-All Makefiles ensure Linux binary is built first:
-
-```bash
-# macOS/Linux
-make -f Makefile.macos docker-build-server
-make -f Makefile.macos docker-build-agent
-```
-
-```powershell
-# Windows
-make -f Makefile.win docker-build-server
-make -f Makefile.win docker-build-agent
-```
-
-### Build Flags
-
-```bash
-GOOS=linux            # Target Linux OS
-GOARCH=amd64          # x86-64 architecture
-CGO_ENABLED=0         # Static linking (no C dependencies)
-```
-
-### Dockerfile Structure
-
-```dockerfile
-FROM alpine/curl:latest        # ~8MB base with curl
-
-WORKDIR /app
-
-COPY build/fluidity-server .   # Pre-built binary (~35MB)
-
-RUN mkdir -p ./config ./certs  # Volume mount directories
-
-COPY configs/server.yaml ./config/
-
 EXPOSE 8443
 
+Works identically on Windows, macOS, and Linux via cross-compilation.
+
 CMD ["./fluidity-server", "--config", "./config/server.yaml"]
+
+```### Build Commands
+
+
+
+## Docker Desktop NetworkingAll Makefiles ensure Linux binary is built first:
+
+
+
+**For agent-server communication on same machine:**```bash
+
+# macOS/Linux
+
+Use `host.docker.internal` in configs (automatically included in certificate SANs).make -f Makefile.macos docker-build-server
+
+make -f Makefile.macos docker-build-agent
+
+**Agent config (`agent.docker.yaml`):**```
+
+```yaml
+
+server_ip: "host.docker.internal"  # For Docker Desktop```powershell
+
+```# Windows
+
+make -f Makefile.win docker-build-server
+
+## Running Containersmake -f Makefile.win docker-build-agent
+
 ```
 
-**Image sizes:** Server ~44MB, Agent ~44MB
+### Server
 
----
+```bash### Build Flags
 
-## Local Testing
+docker run --rm \
 
-### Docker Desktop Networking
+  -v "$(pwd)/certs:/root/certs:ro" \```bash
 
-**Challenge:** Containers need to communicate with each other on the same machine.
+  -v "$(pwd)/configs/server.docker.yaml:/root/config/server.yaml:ro" \GOOS=linux            # Target Linux OS
 
-**Solution:** Certificate generation scripts include `host.docker.internal` in SAN list by default.
+  -p 8443:8443 \GOARCH=amd64          # x86-64 architecture
 
-**Certificate SANs:**
-```
-DNS.1 = fluidity-server
+  fluidity-serverCGO_ENABLED=0         # Static linking (no C dependencies)
+
+``````
+
+
+
+### Agent### Dockerfile Structure
+
+```bash
+
+docker run --rm \```dockerfile
+
+  -v "$(pwd)/certs:/root/certs:ro" \FROM alpine/curl:latest        # ~8MB base with curl
+
+  -v "$(pwd)/configs/agent.docker.yaml:/root/config/agent.yaml:ro" \
+
+  -p 8080:8080 \WORKDIR /app
+
+  fluidity-agent
+
+```COPY build/fluidity-server .   # Pre-built binary (~35MB)
+
+
+
+**Windows:** Use `${PWD}` instead of `$(pwd)` and backticks for line continuation.RUN mkdir -p ./config ./certs  # Volume mount directories
+
+
+
+## TestingCOPY configs/server.yaml ./config/
+
+
+
+```bashEXPOSE 8443
+
+./scripts/test-docker.sh               # Linux/macOS
+
+.\scripts\test-docker.ps1              # WindowsCMD ["./fluidity-server", "--config", "./config/server.yaml"]
+
+``````
+
+
+
+## Troubleshooting**Image sizes:** Server ~44MB, Agent ~44MB
+
+
+
+**Port conflicts:**---
+
+```bash
+
+netstat -ano | findstr :8443## Local Testing
+
+netstat -ano | findstr :8080
+
+```### Docker Desktop Networking
+
+
+
+**Certificate mismatch:****Challenge:** Containers need to communicate with each other on the same machine.
+
+- Ensure certificates include `host.docker.internal` in SANs
+
+- Regenerate with `./scripts/manage-certs.sh`**Solution:** Certificate generation scripts include `host.docker.internal` in SAN list by default.
+
+
+
+**Cannot pull base image:****Certificate SANs:**
+
+- Use `scratch` build: `make -f Makefile.<platform> docker-build-server-scratch````
+
+- Or use cached Alpine imageDNS.1 = fluidity-server
+
 DNS.2 = localhost
-DNS.3 = host.docker.internal  ✅ (Docker Desktop support)
-IP.1 = 127.0.0.1
-IP.2 = ::1
+
+**Container exits immediately:**DNS.3 = host.docker.internal  ✅ (Docker Desktop support)
+
+```bashIP.1 = 127.0.0.1
+
+docker logs fluidity-serverIP.2 = ::1
+
+docker logs fluidity-agent```
+
 ```
 
 **Verify certificates:**
-```powershell
-# Windows
-openssl x509 -in .\certs\server.crt -noout -text | Select-String -Pattern "DNS:"
 
-# macOS/Linux
+**Volume mount issues (Windows):**```powershell
+
+- Use absolute paths: `C:\Users\...\certs`# Windows
+
+- Enable file sharing in Docker Desktop settingsopenssl x509 -in .\certs\server.crt -noout -text | Select-String -Pattern "DNS:"
+
+
+
+## AWS ECR Push# macOS/Linux
+
 openssl x509 -in ./certs/server.crt -noout -text | grep DNS:
-```
 
-### Run Containers Locally
+```bash```
 
-**Windows:**
-```powershell
-# Server
+# Create repository
+
+aws ecr create-repository --repository-name fluidity-server### Run Containers Locally
+
+
+
+# Login**Windows:**
+
+aws ecr get-login-password --region us-east-1 | \```powershell
+
+  docker login --username AWS --password-stdin <account-id>.dkr.ecr.us-east-1.amazonaws.com# Server
+
 docker run --rm `
-  -v ${PWD}\certs:/root/certs:ro `
-  -v ${PWD}\configs\server.docker.yaml:/root/config/server.yaml:ro `
+
+# Tag  -v ${PWD}\certs:/root/certs:ro `
+
+docker tag fluidity-server:latest <account-id>.dkr.ecr.us-east-1.amazonaws.com/fluidity-server:latest  -v ${PWD}\configs\server.docker.yaml:/root/config/server.yaml:ro `
+
   -p 8443:8443 `
-  fluidity-server
 
-# Agent
+# Push  fluidity-server
+
+docker push <account-id>.dkr.ecr.us-east-1.amazonaws.com/fluidity-server:latest
+
+```# Agent
+
 docker run --rm `
-  -v ${PWD}\certs:/root/certs:ro `
+
+## Related Documentation  -v ${PWD}\certs:/root/certs:ro `
+
   -v ${PWD}\configs\agent.docker.yaml:/root/config/agent.yaml:ro `
-  -p 8080:8080 `
-  fluidity-agent
-```
+
+- [Deployment Guide](deployment.md) - All deployment options  -p 8080:8080 `
+
+- [Certificate Management](certificate-management.md) - TLS setup  fluidity-agent
+
+- [Fargate Guide](fargate.md) - AWS deployment```
+
 
 **macOS/Linux:**
 ```bash
