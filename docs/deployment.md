@@ -1,92 +1,18 @@
 # Deployment Guide
 
-This guide covers all supported deployment options for the Fluidity Tunnel Server and Agent: local development, Docker, and AWS Fargate (manual and CloudFormation). Use this as your single reference to get up and running in each environment.
+Quick reference for all Fluidity deployment options.
 
 ---
 
 ## Prerequisites
 
-- Go 1.21+ (for local builds)
-- Docker Desktop (for container runs)
-- Make (for platform-specific Makefiles)
-- OpenSSL (for certificate generation)
-- Node.js 18+ (for WebSocket tests)
-- AWS account + AWS CLI v2 (for cloud deployment)
+- **Go 1.21+** (for local builds)
+- **Docker Desktop** (for containers)
+- **OpenSSL** (for certificates)
+- **Node.js 18+** (for WebSocket tests)
+- **AWS CLI v2** (for cloud deployment)
 
-Certs: Generate client/server certs with scripts in `scripts/` (see Quick Start below).
-
----
-
-## Docker Build Process
-
-Fluidity uses a **simplified single-stage Docker build** that compiles Go binaries locally and copies them into lightweight Alpine containers (~44MB each).
-
-For comprehensive Docker documentation including networking modes, troubleshooting, and advanced configurations, see **[docs/docker.md](docker.md)**.
-
-### Why This Approach?
-
-1. **Corporate Firewall Bypass**: Multi-stage Docker builds often fail in corporate environments where firewalls block Docker Hub or intercept HTTPS traffic. Building locally avoids these issues.
-2. **Faster Builds**: ~2 seconds vs. 10+ seconds for multi-stage builds with Go module downloads.
-3. **Platform Independence**: Works consistently across Windows, macOS, and Linux development environments.
-
-### How It Works
-
-```
-1. Local Compilation → Static Linux binary (GOOS=linux GOARCH=amd64 CGO_ENABLED=0)
-2. Docker COPY       → Binary copied into alpine/curl:latest container
-3. Container Runtime → Minimal Alpine image with curl (~44MB total)
-```
-
-### Build Commands
-
-All platform Makefiles (`Makefile.win`, `Makefile.macos`, `Makefile.linux`) ensure the Linux binary is built before the Docker image:
-
-```bash
-# Windows
-make -f Makefile.win docker-build-server  # Builds Linux binary first, then Docker image
-make -f Makefile.win docker-build-agent   # Same for agent
-
-# macOS
-make -f Makefile.macos docker-build-server
-make -f Makefile.macos docker-build-agent
-
-# Linux
-make docker-build-server
-make docker-build-agent
-```
-
-### Dockerfile Structure
-
-Both `deployments/server/Dockerfile` and `deployments/agent/Dockerfile` follow this simple pattern:
-
-```dockerfile
-FROM alpine/curl:latest
-WORKDIR /app
-COPY build/fluidity-server .  # Pre-built on host
-RUN mkdir -p ./config ./certs
-COPY configs/server.yaml ./config/
-EXPOSE 8443
-CMD ["./fluidity-server", "--config", "./config/server.yaml"]
-```
-
-**Key Benefits**:
-- No Go installation in container
-- No network calls during Docker build (all dependencies resolved locally)
-- Reproducible builds across environments
-- Small image size with essential utilities (curl for health checks)
-
----
-
-## Option A — Local (Binaries)
-
-Best for: development and quick iteration.
-
-1) Generate certificates
-
-```powershell
-# Windows
-./scripts/generate-certs.ps1
-```
+**Generate certificates first** (required for all options):
 
 ```bash
 # macOS/Linux
@@ -94,7 +20,26 @@ chmod +x scripts/generate-certs.sh
 ./scripts/generate-certs.sh
 ```
 
-2) Run server and agent in separate terminals
+```powershell
+# Windows
+./scripts/generate-certs.ps1
+```
+
+---
+
+## Deployment Options
+
+### Option A: Local Development (Recommended for Development)
+
+Run binaries directly on your machine.
+
+**Start server and agent:**
+
+```bash
+# macOS/Linux
+make -f Makefile.macos run-server-local  # or Makefile.linux
+make -f Makefile.macos run-agent-local
+```
 
 ```powershell
 # Windows
@@ -102,25 +47,9 @@ make -f Makefile.win run-server-local
 make -f Makefile.win run-agent-local
 ```
 
-```bash
-# macOS
-make -f Makefile.macos run-server-local
-make -f Makefile.macos run-agent-local
+**Configure browser proxy:** `127.0.0.1:8080`
 
-# Linux
-make -f Makefile.linux run-server-local
-make -f Makefile.linux run-agent-local
-```
-
-3) Configure your browser to use HTTP/HTTPS proxy at `127.0.0.1:8080`
-
-4) Test with curl
-
-```powershell
-# Windows (add --ssl-no-revoke to skip certificate revocation checks)
-curl.exe -x http://127.0.0.1:8080 http://example.com -I
-curl.exe -x http://127.0.0.1:8080 https://example.com -I --ssl-no-revoke
-```
+**Test:**
 
 ```bash
 # macOS/Linux
@@ -128,19 +57,30 @@ curl -x http://127.0.0.1:8080 http://example.com -I
 curl -x http://127.0.0.1:8080 https://example.com -I
 ```
 
+```powershell
+# Windows
+curl.exe -x http://127.0.0.1:8080 http://example.com -I
+curl.exe -x http://127.0.0.1:8080 https://example.com -I --ssl-no-revoke
+```
+
+**Why Option A:**
+- Instant startup (no Docker overhead)
+- Easy debugging
+- Best for rapid iteration
+
 ---
 
-## Option B — Docker (Local Containers)
+### Option B: Docker (Local Containers)
 
-**Best for**: Verifying container builds locally before cloud deployment.
+Verify containerized deployment locally before cloud.
 
-**Note**: Docker containers work seamlessly on all platforms. The certificate generation scripts include `host.docker.internal` (for Windows/macOS Docker Desktop) in the server certificate's Subject Alternative Names, enabling local Docker testing out of the box.
+**Build images:**
 
-For local development and quick iteration, **Option A (local binaries)** is still simpler as it avoids Docker overhead and starts instantly.
-
-### Steps
-
-1) Build images
+```bash
+# macOS/Linux
+make -f Makefile.macos docker-build-server
+make -f Makefile.macos docker-build-agent
+```
 
 ```powershell
 # Windows
@@ -148,472 +88,205 @@ make -f Makefile.win docker-build-server
 make -f Makefile.win docker-build-agent
 ```
 
-```bash
-# macOS/Linux
-make -f Makefile.macos docker-build-server
-make -f Makefile.macos docker-build-agent
-# or
-make -f Makefile.linux docker-build-server
-make -f Makefile.linux docker-build-agent
-```
-
-2) Run containers (Windows PowerShell)
-
-```powershell
-# Server
-docker run --rm `
-  -v ${PWD}\certs:/root/certs:ro `
-  -v ${PWD}\configs\server.windows-docker.yaml:/root/config/server.yaml:ro `
-  -p 8443:8443 `
-  fluidity-server
-
-# Agent
-docker run --rm `
-  -v ${PWD}\certs:/root/certs:ro `
-  -v ${PWD}\configs\agent.windows-docker.yaml:/root/config/agent.yaml:ro `
-  -p 8080:8080 `
-  fluidity-agent
-```
-
-3) Run containers (macOS/Linux)
+**Run containers:**
 
 ```bash
-# Server
+# macOS/Linux - Server
 docker run --rm \
   -v "$(pwd)/certs:/root/certs:ro" \
-  -v "$(pwd)/configs/server.windows-docker.yaml:/root/config/server.yaml:ro" \
+  -v "$(pwd)/configs/server.docker.yaml:/root/config/server.yaml:ro" \
   -p 8443:8443 \
   fluidity-server
 
 # Agent
 docker run --rm \
   -v "$(pwd)/certs:/root/certs:ro" \
-  -v "$(pwd)/configs/agent.windows-docker.yaml:/root/config/agent.yaml:ro" \
+  -v "$(pwd)/configs/agent.docker.yaml:/root/config/agent.yaml:ro" \
   -p 8080:8080 \
   fluidity-agent
 ```
 
-**Config files used:**
-- `server.windows-docker.yaml`: Binds to `0.0.0.0` (accessible from all network interfaces)
-- `agent.windows-docker.yaml`: Connects to `host.docker.internal` (Docker Desktop hostname for host machine)
-
-4) Test the tunnel
-
 ```powershell
-# Windows - Test HTTP
-curl.exe -x http://127.0.0.1:8080 http://example.com -I
+# Windows - Server
+docker run --rm `
+  -v ${PWD}\certs:/root/certs:ro `
+  -v ${PWD}\configs\server.docker.yaml:/root/config/server.yaml:ro `
+  -p 8443:8443 `
+  fluidity-server
 
-# Windows - Test HTTPS
-curl.exe -x http://127.0.0.1:8080 https://example.com -I --ssl-no-revoke
+# Agent
+docker run --rm `
+  -v ${PWD}\certs:/root/certs:ro `
+  -v ${PWD}\configs\agent.docker.yaml:/root/config/agent.yaml:ro `
+  -p 8080:8080 `
+  fluidity-agent
 ```
 
-```bash
-# macOS/Linux - Test HTTP
-curl -x http://127.0.0.1:8080 http://example.com -I
-
-# macOS/Linux - Test HTTPS
-curl -x http://127.0.0.1:8080 https://example.com -I
-```
-
-You should see `HTTP/1.1 200 OK` responses, and both containers logging the traffic flow.
+**Note:** Configs use `host.docker.internal` for agent-to-server communication. See **[Docker Guide](docker.md)** for networking details and troubleshooting.
 
 ---
 
-## Option C — AWS Fargate (ECS) — Manual
+### Option C: AWS Fargate (Manual Management)
 
-Best for: on-demand personal cloud use with minimal management.
+Deploy server to cloud, manage lifecycle manually.
 
-**Note**: This option deploys just the server. For automated lifecycle management with Lambda control plane, see Option D.
+**Summary:**
+1. Build and push server image to ECR
+2. Create ECS cluster, task definition, and service
+3. Start with `desiredCount=1`, get public IP
+4. Run local agent with `--server-ip <IP>`
+5. Stop with `desiredCount=0` when done
 
-Summary of steps (full details in `docs/fargate.md`):
+**Full instructions:** See **[Fargate Guide](fargate.md)**
 
-1) Build, tag, and push the server image to ECR
-2) Create CloudWatch Log Group, Security Group, ECS Cluster
-3) Register a Fargate Task Definition (CPU=256, Memory=512, port 8443, awslogs)
-4) Create an ECS Service with `desiredCount=0`, public subnets, `assignPublicIp=ENABLED`
-5) Start on demand with `desiredCount=1`, wait ~60 seconds for cold start
-6) Fetch the task public IP and run the Agent with `--server-ip <IP>`
-7) Stop when done with `desiredCount=0`
-
-Handy scripts (PowerShell and Bash) to start/stop and print the public IP are included in `docs/fargate.md`.
+**Costs:** ~$0.012/hour (~$0.50/month for 2h/day, ~$3/month for 8h/day)
 
 ---
 
-## Option D — AWS Fargate (ECS) — CloudFormation
+### Option D: AWS Fargate (CloudFormation)
 
-Best for: repeatable, parameterized provisioning.
+Repeatable infrastructure deployment with parameterized template.
 
-**Note**: This option deploys just the server infrastructure. For the complete Lambda control plane (Wake/Sleep/Kill), see Option E.
-
-Use the template at `deployments/cloudformation/fargate.yaml`. It creates:
-- ECS Cluster (Fargate), IAM execution role
-- CloudWatch Log Group
-- Security Group allowing inbound TCP on 8443 (or your port)
-- ECS Task Definition + Service (desired count default 0)
-
-1) Prepare `params.json` (example in `docs/fargate.md`):
-- `ContainerImage` (ECR URI)
-- `VpcId`, `PublicSubnets`
-- Optional tuning: `DesiredCount`, `AllowedIngressCidr`, `Cpu`, `Memory`, `ContainerPort`
-
-2) Deploy/Update
+**Deploy:**
 
 ```powershell
-$stackName = "fluidity-fargate"
-aws cloudformation deploy `
-  --template-file deployments/cloudformation/fargate.yaml `
-  --stack-name $stackName `
-  --parameter-overrides (Get-Content deployments/cloudformation/params.json | Out-String) `
+aws cloudformation deploy \
+  --template-file deployments/cloudformation/fargate.yaml \
+  --stack-name fluidity-fargate \
+  --parameter-overrides file://deployments/cloudformation/params.json \
   --capabilities CAPABILITY_NAMED_IAM
 ```
 
-3) Start/Stop
-- Update `DesiredCount` to 1 (start) or 0 (stop) via `aws cloudformation update-stack` (commands in `docs/fargate.md`)
-- Or use `aws ecs update-service --desired-count ...`
+**Manage:**
 
-4) Fetch Public IP
-- Use the start script in `docs/fargate.md` to get the task's public IP and pass it to the Agent
+```powershell
+# Start
+aws ecs update-service \
+  --cluster fluidity \
+  --service fluidity-server \
+  --desired-count 1
+
+# Stop
+aws ecs update-service \
+  --cluster fluidity \
+  --service fluidity-server \
+  --desired-count 0
+```
+
+**Full instructions:** See **[Fargate Guide](fargate.md)**
 
 ---
 
-## Option E — AWS Lambda Control Plane (Recommended for Production)
+### Option E: Lambda Control Plane (Recommended for Production)
 
-Best for: automated lifecycle management with cost optimization.
+Automated lifecycle with cost optimization.
 
-This option deploys the complete serverless control plane with Lambda functions for automated wake/sleep/kill operations, eliminating the need for manual ECS service management.
+**Architecture:**
+- **Wake Lambda**: Agent calls on startup → ECS DesiredCount=1
+- **Sleep Lambda**: EventBridge scheduler → Check CloudWatch metrics → Scale down if idle
+- **Kill Lambda**: Agent calls on shutdown OR daily scheduled shutdown
 
-### Architecture Overview
+**Prerequisites:**
+- Option D deployed (Fargate infrastructure)
+- Python 3.11 (included in Lambda runtime)
 
-```
-Agent Startup → Wake Lambda → ECS DesiredCount=1 → Server Starts
-                     ↓
-               Agent Connects (retry for X seconds)
-
-EventBridge (every 5 min) → Sleep Lambda → Check CloudWatch Metrics
-                                                 ↓
-                                          If idle → ECS DesiredCount=0
-
-Agent Shutdown → Kill Lambda → ECS DesiredCount=0 (immediate)
-
-EventBridge (daily 11 PM) → Kill Lambda → ECS DesiredCount=0
-```
-
-### Prerequisites
-
-- Completed Option D (Fargate CloudFormation deployment)
-- Python 3.11 installed (for Lambda functions)
-- AWS SDK boto3 (automatically included in Lambda runtime)
-
-### Components
-
-1. **Wake Lambda**: Checks current ECS state, sets DesiredCount=1 if needed
-2. **Sleep Lambda**: Queries CloudWatch metrics, scales down if idle
-3. **Kill Lambda**: Immediately sets DesiredCount=0 (no validation)
-4. **API Gateway**: HTTPS endpoints for Wake and Kill
-5. **EventBridge Schedulers**: 
-   - Periodic Sleep check (every X minutes)
-   - Daily Kill at specific time
-
-### Step 1: Deploy Lambda Infrastructure
+**Deploy:**
 
 ```powershell
-# Deploy Lambda control plane
-aws cloudformation deploy `
-  --template-file deployments/cloudformation/lambda.yaml `
-  --stack-name fluidity-lambda `
-  --parameter-overrides `
-    ECSClusterName=fluidity `
-    ECSServiceName=fluidity-server `
-    IdleThresholdMinutes=15 `
-    SleepCheckIntervalMinutes=5 `
-    DailyKillTime="cron(0 23 * * ? *)" `
+aws cloudformation deploy \
+  --template-file deployments/cloudformation/lambda.yaml \
+  --stack-name fluidity-lambda \
+  --parameter-overrides \
+    ECSClusterName=fluidity \
+    ECSServiceName=fluidity-server \
+    IdleThresholdMinutes=15 \
+    SleepCheckIntervalMinutes=5 \
+    DailyKillTime="cron(0 23 * * ? *)" \
   --capabilities CAPABILITY_NAMED_IAM
 ```
 
-### Step 2: Get API Gateway Endpoints
-
-```powershell
-# Get outputs
-aws cloudformation describe-stacks `
-  --stack-name fluidity-lambda `
-  --query 'Stacks[0].Outputs'
-```
-
-Note the following outputs:
-- `WakeAPIEndpoint`: HTTPS endpoint for wake
-- `KillAPIEndpoint`: HTTPS endpoint for kill
-- `APIKey`: API key for authentication
-
-### Step 3: Update Agent Configuration
-
-Add the Lambda control plane settings to your agent config:
+**Configure agent:**
 
 ```yaml
 # configs/agent.local.yaml
-server_ip: "<PUBLIC_IP>"  # Get from Fargate deployment
-server_port: 8443
-local_proxy_port: 8080
-cert_file: "./certs/client.crt"
-key_file: "./certs/client.key"
-ca_cert_file: "./certs/ca.crt"
-log_level: "info"
-
-# Lambda control plane (NEW)
-wake_api_endpoint: "https://xxxxxxxxxx.execute-api.us-east-1.amazonaws.com/prod/wake"
-kill_api_endpoint: "https://xxxxxxxxxx.execute-api.us-east-1.amazonaws.com/prod/kill"
-api_key: "your-api-key-here"
-connection_timeout: "90s"           # Max time to wait after wake
-connection_retry_interval: "5s"     # Retry interval
+wake_api_endpoint: "https://xxx.execute-api.us-east-1.amazonaws.com/prod/wake"
+kill_api_endpoint: "https://xxx.execute-api.us-east-1.amazonaws.com/prod/kill"
+api_key: "your-api-key"
+connection_timeout: "90s"
+connection_retry_interval: "5s"
 ```
 
-### Step 4: Update Server Configuration
-
-Enable CloudWatch metrics emission:
+**Enable server metrics:**
 
 ```yaml
-# configs/server.yaml (in Docker image or via env vars)
-listen_addr: "0.0.0.0"
-listen_port: 8443
-cert_file: "/root/certs/server.crt"
-key_file: "/root/certs/server.key"
-ca_cert_file: "/root/certs/ca.crt"
-log_level: "info"
-max_connections: 100
-
-# CloudWatch metrics (NEW)
+# configs/server.yaml (rebuild Docker image after changes)
 emit_metrics: true
-metrics_interval: "60s"  # Emit every 60 seconds
+metrics_interval: "60s"
 ```
 
-Rebuild and push the server Docker image:
+**Costs:** Lambda < $0.05/month + Fargate usage
 
-```powershell
-# Update configs/server.yaml with emit_metrics: true
-make -f Makefile.win docker-build-server
-docker tag fluidity-server:latest <ECR_URI>
-docker push <ECR_URI>
-
-# Update ECS task definition to use new image
-aws ecs register-task-definition --cli-input-json file://updated-task-def.json
-```
-
-### Step 5: Test the Lifecycle
-
-**Test Wake:**
-```powershell
-# Agent automatically calls wake on startup
-./build/fluidity-agent --config ./configs/agent.local.yaml
-
-# Monitor wake
-aws logs tail /aws/lambda/fluidity-wake --follow
-```
-
-**Test Sleep (automatic):**
-- Wait 15+ minutes with no traffic
-- Sleep Lambda runs every 5 minutes
-- Check logs:
-  ```powershell
-  aws logs tail /aws/lambda/fluidity-sleep --follow
-  ```
-
-**Test Kill (agent shutdown):**
-```powershell
-# Stop agent (Ctrl+C)
-# Agent calls kill on shutdown
-
-# Or trigger manually
-curl -X POST "https://xxxxxxxxxx.execute-api.us-east-1.amazonaws.com/prod/kill" `
-  -H "x-api-key: your-api-key-here"
-```
-
-**Test Daily Kill:**
-- Scheduled automatically at configured time (default 11 PM UTC)
-- Check EventBridge rules:
-  ```powershell
-  aws events list-rules --name-prefix fluidity
-  ```
-
-### Lambda Function Details
-
-#### Wake Lambda
-- Checks current ECS service state
-- Sets `desiredCount=1` if service is stopped
-- Returns idempotent response if already running
-- Invoked by agent on startup via API Gateway
-
-#### Sleep Lambda
-- Queries CloudWatch for `ActiveConnections` and `LastActivityEpochSeconds` metrics
-- Calculates idle duration based on last activity
-- Sets `desiredCount=0` if idle threshold exceeded
-- Invoked periodically by EventBridge scheduler
-
-#### Kill Lambda
-- Immediately sets `desiredCount=0` without validation
-- Used for emergency shutdown or agent graceful termination
-- Invoked by agent on shutdown via API Gateway
-
-### IAM Permissions
-
-The Lambda functions require:
-- `ecs:DescribeServices`
-- `ecs:UpdateService`
-- `cloudwatch:GetMetricData` (Sleep Lambda only)
-
-The server ECS task requires:
-- `cloudwatch:PutMetricData`
-
-### Cost Optimization
-
-**Lambda costs**:
-- Wake Lambda: ~1 invocation/day = negligible
-- Sleep Lambda: ~288 invocations/day (every 5 min) = < $0.01/month
-- Kill Lambda: ~2 invocations/day = negligible
-- Total Lambda cost: < $0.05/month
-
-**Combined costs** (Lambda + Fargate):
-- 2 hours/day active: ~$0.50/month Fargate + $0.05 Lambda = **$0.55/month**
-- 8 hours/day active: ~$3/month Fargate + $0.05 Lambda = **$3.05/month**
-- Manual management (no Lambda): Same Fargate cost but requires manual start/stop
-
-### Monitoring
-
-**Lambda logs:**
-```powershell
-# Wake
-aws logs tail /aws/lambda/fluidity-wake --follow
-
-# Sleep
-aws logs tail /aws/lambda/fluidity-sleep --follow
-
-# Kill
-aws logs tail /aws/lambda/fluidity-kill --follow
-```
-
-**CloudWatch metrics:**
-```powershell
-# View metrics
-aws cloudwatch get-metric-statistics `
-  --namespace Fluidity `
-  --metric-name ActiveConnections `
-  --dimensions Name=Service,Value=fluidity-server `
-  --start-time 2025-11-01T00:00:00Z `
-  --end-time 2025-11-01T23:59:59Z `
-  --period 300 `
-  --statistics Average
-```
-
-**ECS service status:**
-```powershell
-aws ecs describe-services `
-  --cluster fluidity `
-  --services fluidity-server `
-  --query 'services[0].[desiredCount,runningCount,pendingCount]'
-```
-
-### Troubleshooting
-
-**Agent can't wake server:**
-- Check API Gateway endpoint URL
-- Verify API key is correct
-- Check Lambda execution logs
-- Ensure Lambda has ECS permissions
-
-**Sleep Lambda not scaling down:**
-- Check CloudWatch metrics are being emitted (server config)
-- Verify idle threshold is appropriate
-- Check Lambda logs for metric query results
-
-**Daily kill not working:**
-- Verify EventBridge rule is enabled
-- Check cron expression timezone (UTC)
-- Review Lambda execution logs
+**Full instructions:** See **[Lambda Functions Guide](lambda.md)**
 
 ---
 
-## Security Tips
+## Quick Start by Use Case
 
-- Restrict Security Group ingress on 8443 to your current public IP (use `/32` CIDR)
-- Keep mTLS enabled end-to-end; protect private keys and CA material
-- Set CloudWatch Logs retention (e.g., 7–30 days)
-- Prefer AWS Secrets Manager/SSM Parameter Store if you later externalize certs/configs
+| Use Case | Recommended Option | Why |
+|----------|-------------------|-----|
+| **Local development** | A: Local binaries | Fastest iteration, no overhead |
+| **Testing containerization** | B: Docker | Verify images before cloud deployment |
+| **Personal cloud use (manual)** | C: Fargate manual | Simple on-demand cloud access |
+| **Repeatable infrastructure** | D: Fargate CloudFormation | Parameterized, version-controlled |
+| **Production with cost optimization** | E: Lambda control plane | Automated lifecycle, minimal cost |
 
 ---
 
-## Troubleshooting
+## Common Issues
 
-### Local/Docker Testing
+### Windows: Certificate Revocation Error
 
-**Windows: `CRYPT_E_NO_REVOCATION_CHECK` error with curl**
+**Error:** `CRYPT_E_NO_REVOCATION_CHECK`
 
-If you see this error when testing HTTPS:
-```
-curl: (35) schannel: next InitializeSecurityContext failed: CRYPT_E_NO_REVOCATION_CHECK (0x80092012)
-```
-
-**Solution:** Add `--ssl-no-revoke` to your curl command:
+**Solution:** Add `--ssl-no-revoke` flag:
 ```powershell
 curl.exe -x http://127.0.0.1:8080 https://example.com -I --ssl-no-revoke
 ```
 
-**Why:** Windows curl uses Schannel (native Windows SSL) which checks certificate revocation by default. This fails with self-signed certificates or when revocation servers are unreachable. The `--ssl-no-revoke` flag is safe for local testing.
+### Docker: Port Conflicts
 
----
-
-**Docker: Port conflicts or connection issues**
-
-If you encounter issues running Docker containers locally:
-
-**Common Issues:**
-- Port already in use: Another process is using port 8443 or 8080
-- Cannot connect: Firewall blocking Docker network traffic
-
-**Solutions:**
-
-1. **Check port usage:**
+**Solution:** Check port usage:
 ```powershell
 # Windows
 netstat -ano | findstr :8443
 netstat -ano | findstr :8080
 ```
 
-2. **Stop conflicting processes or change ports:**
-```powershell
-# Edit configs/server.yaml or configs/agent.yaml to use different ports
-```
+Change ports in `configs/server.yaml` or `configs/agent.yaml` if needed.
 
-3. **Verify Docker networking:**
-```powershell
-# Server should listen on 0.0.0.0 (all interfaces)
-# Agent should connect to host.docker.internal (Windows/macOS)
-```
+### Fargate: Task Stuck in PENDING
 
-**Note:** The certificate generation scripts now include `host.docker.internal` in the SAN list by default, so Windows/macOS Docker Desktop networking works out of the box.
+**Common causes:**
+- Subnets not public
+- `assignPublicIp` not enabled
+- Insufficient Fargate quota
 
----**Alternatives:**
-- Use PowerShell: `Invoke-WebRequest -Uri https://example.com -Proxy http://127.0.0.1:8080 -Method Head`
-- Use WSL: `wsl curl -x http://127.0.0.1:8080 https://example.com -I`
-- Test with a browser (configure proxy to 127.0.0.1:8080)
-
-### AWS Fargate
-
-- Fargate task stuck in `PENDING`: check subnets are public, `assignPublicIp=ENABLED`, sufficient Fargate quota
-- No logs: verify `awslogs` configuration and log group exists
-- Connection refused: confirm SG allows port 8443 and container is listening
-- TLS errors: confirm CA, server cert, key paths, and that Agent uses the correct `--server-ip`
+**Solution:** See **[Fargate Guide](fargate.md)** troubleshooting section.
 
 ---
 
-## Costs (estimates)
+## Security Best Practices
 
-- Fargate (0.25 vCPU, 0.5GB): ~$0.012/hour (≈ $0.50/month for 2h/day, ≈ $3/month for 8h/day)
-- 24/7 Fargate: ≈ $9/month
-- Additional minor charges: CloudWatch logs, ECR storage, data transfer
+1. **Restrict Security Group:** Limit port 8443 ingress to your IP (`/32` CIDR)
+2. **Protect certificates:** Secure private keys and CA material
+3. **Enable logging retention:** Set CloudWatch Logs retention (7-30 days)
+4. **Use secrets management:** Consider AWS Secrets Manager for production
 
 ---
 
-## References
+## Related Documentation
 
-- `docs/fargate.md` — Detailed Fargate and CloudFormation instructions
-- `deployments/cloudformation/fargate.yaml` — CloudFormation template for ECS on Fargate
-- `scripts/` — Certificate generation and test scripts
-- `configs/` — Example configuration files
+- **[Docker Guide](docker.md)** - Container networking, build process, troubleshooting
+- **[Fargate Guide](fargate.md)** - Detailed AWS ECS deployment steps
+- **[Lambda Functions](lambda.md)** - Control plane architecture and configuration
+- **[Architecture](architecture.md)** - System design and components

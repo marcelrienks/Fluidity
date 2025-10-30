@@ -1,387 +1,349 @@
 # Testing Guide
 
-This document provides a comprehensive guide to testing the Fluidity secure tunnel system.
+Comprehensive testing strategy for the Fluidity secure tunnel system.
 
-## Table of Contents
+---
 
-- [Overview](#overview)
-- [Test Types](#test-types)
-- [Quick Start](#quick-start)
-- [Unit Tests](#unit-tests)
-- [Integration Tests](#integration-tests)
-- [End-to-End Tests](#end-to-end-tests)
-- [Test Coverage](#test-coverage)
-- [CI/CD Integration](#cicd-integration)
-- [Lambda Control Plane Testing](#lambda-control-plane-testing)
-- [Troubleshooting](#troubleshooting)
+## Testing Strategy
 
-## Overview
-
-Fluidity implements a comprehensive three-tier testing strategy:
+Three-tier approach for complete system validation:
 
 ```
-                  ┌────────────┐
-                  │   E2E (6)  │  ← Full system, real binaries
-                  │  Slowest   │
-                  └────────────┘
-                ┌───────────────┐
-                │Integration(30)│   ← Component interaction
-                │    Medium     │
-                └───────────────┘
-            ┌──────────────────────┐
-            │   Unit Tests (17)    │  ← Individual functions
-            │       Fastest        │
-            └──────────────────────┘
+         ┌────────────┐
+         │  E2E (6)   │  ← Full system, real binaries
+         │  Slowest   │
+         └────────────┘
+       ┌───────────────┐
+       │Integration(30)│  ← Component interaction
+       │   Medium      │
+       └───────────────┘
+   ┌──────────────────────┐
+   │   Unit Tests (17)    │  ← Individual functions
+   │      Fastest         │
+   └──────────────────────┘
 ```
 
-**Total: 53+ tests covering all aspects of the system**
+**Total: 53+ tests** covering all system aspects
 
-## Test Types
-
-### 1. Unit Tests
-- **Location**: `internal/shared/*/`
-- **Purpose**: Test individual functions and methods in isolation
-- **Count**: 17 tests
-- **Coverage**: 100% for circuit breaker and retry logic
-- **Execution Time**: < 1 second
-
-### 2. Integration Tests
-- **Location**: `internal/integration/`
-- **Purpose**: Test component interactions with real network connections
-- **Count**: 30+ tests
-- **Coverage**: Full component interaction testing
-- **Execution Time**: ~3-10 seconds (parallel execution)
-
-### 3. End-to-End (E2E) Tests
-- **Location**: `scripts/test-*.ps1` and `scripts/test-*.sh`
-- **Purpose**: Test complete system with real binaries/containers
-- **Count**: 6 scenarios (3 protocols × 2 environments)
-- **Coverage**: Full system validation
-- **Execution Time**: 30-120 seconds
+---
 
 ## Quick Start
 
-Run all tests at once:
+```bash
+# All tests
+go test ./internal/... -v -timeout 5m
+./scripts/test-local.sh
+./scripts/test-docker.sh
+```
 
 ```powershell
-# Run everything
+# Windows
 go test ./internal/... -v -timeout 5m
 .\scripts\test-local.ps1
 .\scripts\test-docker.ps1
 ```
 
-Or run specific test types:
+**Or run specific types:**
 
-```powershell
-# Just unit tests (fastest)
+```bash
+# Unit tests (fastest, < 1s)
 go test ./internal/shared/... -v
 
-# Just integration tests
+# Integration tests (~3-10s)
 go test ./internal/integration/... -v -timeout 5m
 
-# Just E2E tests
-.\scripts\test-local.ps1   # or ./scripts/test-local.sh on Linux/macOS
+# E2E tests (30-120s)
+./scripts/test-local.sh
 ```
+
+---
 
 ## Unit Tests
 
+**Location:** `internal/shared/*/`  
+**Count:** 17 tests  
+**Coverage:** 100% for circuit breaker and retry logic  
+**Execution:** < 1 second
+
 ### What They Test
 
-**Circuit Breaker** (`internal/shared/circuitbreaker/circuitbreaker_test.go`)
+**Circuit Breaker:**
 - State transitions (Closed → Open → Half-Open → Closed)
 - Failure threshold detection
-- Automatic recovery after timeout
+- Automatic recovery
 - Concurrent request handling
-- Configuration validation
 
-**Retry Mechanism** (`internal/shared/retry/retry_test.go`)
+**Retry Mechanism:**
 - Successful operations
-- Retry on transient failures
+- Transient failure retry
 - Maximum attempts limit
 - Exponential backoff timing
 - Context cancellation
-- Generic type support
 
 ### Running Unit Tests
 
-```powershell
-# Run all unit tests
+```bash
+# All unit tests
 go test ./internal/shared/... -v
 
-# Run specific package
+# Specific package
 go test ./internal/shared/circuitbreaker -v
 go test ./internal/shared/retry -v
 
-# Run with coverage
+# With coverage
 go test ./internal/shared/... -cover
 
-# Generate coverage report (HTML)
+# HTML coverage report
 go test ./internal/shared/... -coverprofile=coverage.out
 go tool cover -html=coverage.out
 ```
 
-### Expected Output
-
+**Expected output:**
 ```
-=== RUN   TestCircuitBreakerStateTransitions
-=== RUN   TestCircuitBreakerFailureThreshold
-=== RUN   TestRetrySuccess
-=== RUN   TestRetryExponentialBackoff
-...
---- PASS: All tests (0.23s)
+--- PASS: TestCircuitBreakerStateTransitions (0.12s)
+--- PASS: TestRetryExponentialBackoff (0.05s)
 PASS
 coverage: 100.0% of statements
 ```
 
+---
+
 ## Integration Tests
+
+**Location:** `internal/integration/`  
+**Count:** 30+ tests  
+**Coverage:** Full component interaction  
+**Execution:** ~3-10 seconds (parallel)
 
 ### What They Test
 
-**Tunnel Tests** (`internal/integration/tunnel_test.go`)
-- ✅ Connection establishment and disconnection
-- ✅ Automatic reconnection after failure
-- ✅ HTTP request forwarding through tunnel
-- ✅ Request timeout handling
-- ✅ Concurrent request handling (10 simultaneous)
-- ✅ Multiple HTTP methods (GET, POST, PUT, DELETE, PATCH)
-- ✅ Large payload transfer (1MB)
-- ✅ Disconnect during active request
+**Tunnel Tests:**
+- Connection establishment/disconnection
+- Automatic reconnection after failure
+- HTTP request forwarding
+- Request timeout handling
+- Concurrent requests (10 simultaneous)
+- Multiple HTTP methods (GET, POST, PUT, DELETE, PATCH)
+- Large payload transfer (1MB)
+- Disconnect during active request
 
-**Proxy Tests** (`internal/integration/proxy_test.go`)
-- ✅ HTTP proxy functionality
-- ✅ HTTPS CONNECT tunneling
-- ✅ Invalid target error handling
-- ✅ Concurrent client connections (10 simultaneous)
-- ✅ Large response handling (1MB)
-- ✅ Custom header forwarding
+**Proxy Tests:**
+- HTTP proxy functionality
+- HTTPS CONNECT tunneling
+- Invalid target error handling
+- Concurrent client connections (10 simultaneous)
+- Large response handling (1MB)
+- Custom header forwarding
 
-**Circuit Breaker Integration** (`internal/integration/circuitbreaker_test.go`)
-- ✅ Circuit trips after consecutive failures
-- ✅ Automatic recovery after timeout period
-- ✅ Protection from cascading failures
-- ✅ Metrics collection and tracking
-- ✅ Complete state transition verification
+**Circuit Breaker Integration:**
+- Circuit trips after consecutive failures
+- Automatic recovery after timeout
+- Protection from cascading failures
+- Metrics collection and tracking
+- Complete state transition verification
 
-**WebSocket Tests** (`internal/integration/websocket_test.go`)
-- ✅ WebSocket connection through tunnel
-- ✅ Multiple message exchange (text messages)
-- ✅ Binary message transfer
-- ✅ Ping/pong keepalive mechanism
-- ✅ Concurrent WebSocket connections (5 simultaneous)
-- ✅ Large message handling (100KB)
-- ✅ Proper connection cleanup
+**WebSocket Tests:**
+- WebSocket connection through tunnel
+- Multiple message exchange (text/binary)
+- Ping/pong keepalive
+- Concurrent connections (5 simultaneous)
+- Large message handling (100KB)
+- Proper connection cleanup
 
 ### Running Integration Tests
 
-```powershell
-# Run all integration tests
+```bash
+# All integration tests
 go test ./internal/integration/... -v -timeout 5m
 
-# Run specific test file
+# Specific test file
 go test ./internal/integration -run TestTunnel -v
 go test ./internal/integration -run TestProxy -v
-go test ./internal/integration -run TestCircuitBreaker -v
 go test ./internal/integration -run TestWebSocket -v
 
-# Run single test
-go test ./internal/integration -run TestTunnelConnection -v
-
-# Run with race detection
+# With race detection
 go test ./internal/integration/... -race -timeout 5m
-
-# Run in parallel (default behavior)
-go test ./internal/integration/... -parallel 4 -v
 ```
 
-### Expected Output
-
+**Expected output:**
 ```
-=== RUN   TestTunnelConnection
-=== PAUSE TestTunnelConnection
-=== RUN   TestProxyHTTPRequest
-=== PAUSE TestProxyHTTPRequest
-=== CONT  TestTunnelConnection
-=== CONT  TestProxyHTTPRequest
-    tunnel_test.go:33: Tunnel connection established successfully
---- PASS: TestTunnelConnection (0.62s)
-    proxy_test.go:45: HTTP request through proxy successful
---- PASS: TestProxyHTTPRequest (0.58s)
-...
+--- PASS: TestTunnelConnection (0.45s)
+--- PASS: TestProxyHTTPS (1.20s)
+--- PASS: TestWebSocketMessages (0.89s)
 PASS
-ok      fluidity/internal/integration   3.172s
 ```
 
-### Integration Test Features
+---
 
-- **Parallel Execution**: All tests use `t.Parallel()` for concurrent execution
-- **Test Isolation**: Each test generates unique certificates and uses random ports
-- **Automatic Cleanup**: Resources are cleaned up with `defer` and `t.Cleanup()`
-- **No Shared State**: Tests are completely independent
+## End-to-End (E2E) Tests
 
-## End-to-End Tests
+**Location:** `scripts/test-*.ps1`, `scripts/test-*.sh`  
+**Count:** 6 scenarios (3 protocols × 2 environments)  
+**Coverage:** Full system validation  
+**Execution:** 30-120 seconds
 
-### What They Test
+### Test Scenarios
 
-**Local Binary Tests** (`test-local.ps1` / `test-local.sh`)
-1. Build agent and server binaries from source
-2. Start server with production configuration
-3. Start agent with production configuration
-4. **HTTP Test**: Make HTTP request through proxy
-5. **HTTPS Test**: Make HTTPS request through proxy
-6. **WebSocket Test**: Establish WebSocket connection and exchange messages
-7. Cleanup processes
+**Local Environment:**
+- HTTP tunneling
+- HTTPS CONNECT tunneling
+- WebSocket tunneling
 
-**Docker Container Tests** (`test-docker.ps1` / `test-docker.sh`)
-1. Build Docker images for agent and server
-2. Create isolated Docker network
-3. Start server container
-4. Start agent container
-5. **HTTP Test**: Execute curl in agent container
-6. **HTTPS Test**: Execute curl in agent container
-7. **WebSocket Test**: Execute Node.js WebSocket client in agent container
-8. Cleanup containers and network
+**Docker Environment:**
+- HTTP tunneling
+- HTTPS CONNECT tunneling
+- WebSocket tunneling
 
 ### Running E2E Tests
 
-**Prerequisites:**
-- **Local Tests**: Go 1.21+, Node.js, curl
-- **Docker Tests**: Docker (Docker Desktop on Windows/Mac)
-
-**Windows (PowerShell):**
-```powershell
-# Local binary tests
-.\scripts\test-local.ps1
-
-# Docker container tests
-.\scripts\test-docker.ps1
+```bash
+# Local binaries
+./scripts/test-local.sh
 ```
 
-**Linux/macOS:**
-```bash
-# Local binary tests
-./scripts/test-local.sh
+```powershell
+# Windows
+.\scripts\test-local.ps1
+```
 
-# Docker container tests
+**Docker containers:**
+```bash
 ./scripts/test-docker.sh
 ```
 
-### Expected Output
-
-```
-==================================================
-  Fluidity Local Integration Test
-==================================================
-
-[Step 1/9] Building agent...
-✓ Agent built successfully
-
-[Step 2/9] Building server...
-✓ Server built successfully
-
-[Step 3/9] Starting server...
-✓ Server started (PID: 12345)
-
-[Step 4/9] Starting agent...
-✓ Agent started (PID: 12346)
-
-[Step 5/9] Waiting for initialization (5 seconds)...
-✓ Services initialized
-
-[Step 6/9] Testing HTTP request...
-✓ HTTP request successful (200 OK)
-
-[Step 7/9] Testing HTTPS request...
-✓ HTTPS request successful (200 OK)
-
-[Step 8/9] Testing WebSocket...
-✓ WebSocket test successful
-
-[Step 9/9] Cleaning up...
-✓ Cleanup complete
-
-==================================================
-  All tests passed! ✓
-==================================================
+```powershell
+# Windows
+.\scripts\test-docker.ps1
 ```
 
-### E2E Test Configuration
+**Expected output:**
+```
+Starting server...
+Starting agent...
+Testing HTTP request... PASSED
+Testing HTTPS request... PASSED
+Testing WebSocket... PASSED
+All tests passed!
+```
 
-**Initialization Wait Times:**
-- **Local tests**: 5 seconds (allows time for mTLS handshake, circuit breaker setup)
-- **Docker tests**: 10 seconds (additional time for container startup and DNS resolution)
+---
 
-These wait times account for:
-- TLS handshake completion
-- Circuit breaker initialization
-- Retry mechanism setup
-- Network buffer management
+## Lambda Control Plane Testing
+
+### Unit Tests (Python)
+
+**Location:** `tests/lambda/`  
+**Framework:** pytest with moto (AWS mocking)
+
+**Test scenarios:**
+- Wake when task stopped
+- Wake when already running (idempotent)
+- Sleep when idle
+- No sleep when active
+- Kill immediate shutdown
+
+**Run:**
+```bash
+# Install dependencies
+pip install pytest moto boto3
+
+# Run tests
+pytest tests/lambda/ -v
+
+# With coverage
+pytest tests/lambda/ --cov=lambda_functions --cov-report=html
+```
+
+### Integration Tests
+
+**Agent lifecycle:**
+- Startup wakes server
+- Shutdown kills server
+
+**Server metrics:**
+- Periodic CloudWatch emission
+- Metrics update on activity
+
+### E2E Tests
+
+**Full lifecycle test:**
+```bash
+#!/bin/bash
+# tests/e2e/lambda_lifecycle_test.sh
+
+echo "[1/8] Deploying Lambda control plane..."
+aws cloudformation deploy --template-file lambda.yaml --stack-name test
+
+echo "[2/8] Verifying server stopped (DesiredCount=0)..."
+# Check ECS service
+
+echo "[3/8] Starting agent (triggers wake)..."
+# Start agent with wake API configured
+
+echo "[4/8] Waiting for wake and connection retry..."
+sleep 30
+
+echo "[5/8] Verifying server started (DesiredCount=1)..."
+# Check ECS service
+
+echo "[6/8] Testing HTTP request..."
+curl -x http://localhost:8080 http://example.com
+
+echo "[7/8] Stopping agent (triggers kill)..."
+# Stop agent
+
+echo "[8/8] Verifying server stopped (DesiredCount=0)..."
+# Check ECS service
+
+echo "✓ Full lifecycle test passed!"
+```
+
+**Idle detection test:**
+- Send traffic to establish activity
+- Wait for idle timeout (6 minutes)
+- Manually invoke Sleep Lambda
+- Verify server stopped
+
+**EventBridge scheduler test:**
+- Verify rules created (Sleep: every 5 min, Kill: daily 11 PM UTC)
+- Manually trigger rules
+- Check ECS service responds correctly
+
+**Full details:** See **[Lambda Functions Guide](lambda.md)**
+
+---
 
 ## Test Coverage
 
-### Current Coverage Metrics
+```bash
+# Generate coverage for all packages
+go test ./... -coverprofile=coverage.out
 
-| Category | Tests | Coverage | Status |
-|----------|-------|----------|--------|
-| Unit Tests | 49 | 72-100% per package | ✅ ALL PASS |
-| Integration Tests | 26 | 68.6% | ✅ ALL PASS |
-| E2E Tests | 6 scenarios | Full system | ✅ PASS |
-| **TOTAL** | **75+** | **~77% overall** | ✅ **ALL PASS** |
+# View coverage by package
+go tool cover -func=coverage.out
 
-### Detailed Breakdown
-
-**Unit Test Coverage by Package:**
-- `internal/shared/protocol`: 9 tests, **100.0%** coverage ✅
-- `internal/shared/logging`: 14 tests, **95.1%** coverage ✅
-- `internal/shared/config`: 9 tests, **90.7%** coverage ✅
-- `internal/shared/circuitbreaker`: 7 tests, **84.1%** coverage ✅
-- `internal/shared/retry`: 10 tests, **72.1%** coverage ✅
-
-**Integration Test Coverage:**
-- Tunnel functionality: 8 tests
-- Proxy functionality: 7 tests (HTTP, HTTPS, CONNECT, headers, large responses)
-- Circuit breaker integration: 6 tests (trips, recovery, cascading protection, metrics, state transitions)
-- WebSocket functionality: 9 tests (connection, messages, binary, ping/pong, concurrency, close handshake)
-- **Total: 26 integration tests, 68.6% coverage**
-
-**E2E Test Coverage:**
-- HTTP protocol: 2 scenarios (local + Docker)
-- HTTPS protocol: 2 scenarios (local + Docker)
-- WebSocket protocol: 2 scenarios (local + Docker)
-
-### Generating Coverage Reports
-
-```powershell
-# Generate coverage for unit tests
-go test ./internal/shared/... -coverprofile=unit-coverage.out
-go tool cover -html=unit-coverage.out -o unit-coverage.html
-
-# Generate coverage for integration tests (note: less meaningful for integration)
-go test ./internal/integration/... -coverprofile=integration-coverage.out
-go tool cover -html=integration-coverage.out -o integration-coverage.html
-
-# Generate combined coverage
-go test ./internal/... -coverprofile=combined-coverage.out
-go tool cover -html=combined-coverage.out -o combined-coverage.html
+# HTML report
+go tool cover -html=coverage.out
 ```
+
+**Coverage targets:**
+- Unit tests: 100% (critical paths)
+- Integration tests: 80%+ (component interaction)
+- E2E tests: Full system validation
+
+---
 
 ## CI/CD Integration
 
 ### GitHub Actions Example
 
-Create `.github/workflows/test.yml`:
-
 ```yaml
-name: Tests
+name: CI
 
-on:
-  push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main, develop ]
+on: [push, pull_request]
 
 jobs:
   unit-tests:
-    name: Unit Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -392,7 +354,6 @@ jobs:
         run: go test ./internal/shared/... -v -cover
 
   integration-tests:
-    name: Integration Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -402,8 +363,7 @@ jobs:
       - name: Run Integration Tests
         run: go test ./internal/integration/... -v -timeout 5m
 
-  e2e-local:
-    name: E2E Local Tests
+  e2e-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -413,289 +373,131 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: '18'
-      - name: Run E2E Local Tests
+      - name: Run E2E Tests
         run: ./scripts/test-local.sh
-
-  e2e-docker:
-    name: E2E Docker Tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Run E2E Docker Tests
-        run: ./scripts/test-docker.sh
 ```
 
 ### Pre-commit Hook
 
-Create `.git/hooks/pre-commit`:
-
 ```bash
 #!/bin/bash
+# .git/hooks/pre-commit
+
 echo "Running unit tests..."
-go test ./internal/shared/... -v
-if [ $? -ne 0 ]; then
-    echo "Unit tests failed. Commit aborted."
-    exit 1
-fi
+go test ./internal/shared/... -v || exit 1
 
 echo "Running integration tests..."
-go test ./internal/integration/... -v -timeout 2m
-if [ $? -ne 0 ]; then
-    echo "Integration tests failed. Commit aborted."
-    exit 1
-fi
+go test ./internal/integration/... -v -timeout 2m || exit 1
 
 echo "All tests passed!"
-exit 0
 ```
 
-Make it executable:
 ```bash
 chmod +x .git/hooks/pre-commit
 ```
 
-## Lambda Control Plane Testing
-
-### Unit Tests
-
-Test individual Lambda functions for correct behavior using `pytest` with `moto` for AWS mocking:
-
-**Wake Lambda Tests:**
-- Test wake when task stopped (verifies DesiredCount updated to 1)
-- Test wake when task already running (verifies idempotent behavior)
-
-**Sleep Lambda Tests:**
-- Test sleep when idle (verifies DesiredCount set to 0 based on metrics)
-- Test no sleep when active (verifies DesiredCount remains 1)
-
-**Kill Lambda Tests:**
-- Test kill immediate shutdown (verifies DesiredCount set to 0 without validation)
-
-**Run Lambda Unit Tests:**
-```bash
-# Install dependencies
-pip install pytest moto boto3
-
-# Run all Lambda tests
-pytest tests/lambda/ -v
-
-# Run with coverage
-pytest tests/lambda/ --cov=lambda_functions --cov-report=html
-```
-
-### Integration Tests
-
-Test lifecycle integration between agent, server, and Lambda control plane:
-
-**Agent Lifecycle Tests:**
-- Agent startup wakes server (verify /wake endpoint called, connection retry logic)
-- Agent shutdown kills server (verify /kill endpoint called before exit)
-
-**Server Metrics Tests:**
-- Server emits metrics to CloudWatch (verify periodic emission of ActiveConnections and LastActivityEpochSeconds)
-- Metrics update on activity (verify counters increment with traffic)
-
-### End-to-End Tests
-
-Test complete wake → connect → idle → sleep → kill lifecycle:
-
-**Full Lifecycle Test:**
-```bash
-#!/bin/bash
-# tests/e2e/lambda_lifecycle_test.sh
-
-echo "[1/8] Deploying Lambda control plane..."
-aws cloudformation deploy --template-file lambda.yaml --stack-name fluidity-lambda-test
-
-echo "[2/8] Verifying server is stopped (DesiredCount=0)..."
-# Check ECS service DesiredCount
-
-echo "[3/8] Starting agent (should trigger wake)..."
-# Start agent with wake API configured
-
-echo "[4/8] Waiting for agent to call wake and retry connection..."
-sleep 30
-
-echo "[5/8] Verifying server started (DesiredCount=1)..."
-# Check ECS service DesiredCount
-
-echo "[6/8] Testing HTTP request through tunnel..."
-curl -x http://localhost:8080 http://example.com
-
-echo "[7/8] Stopping agent (should trigger kill)..."
-# Stop agent gracefully
-
-echo "[8/8] Verifying server stopped (DesiredCount=0)..."
-# Check ECS service DesiredCount after 60 seconds
-
-echo "✓ Full lifecycle test passed!"
-```
-
-**Idle Detection Test:**
-```bash
-#!/bin/bash
-# tests/e2e/lambda_idle_test.sh
-
-echo "[1/6] Starting agent and server..."
-# Bring up infrastructure
-
-echo "[2/6] Sending traffic to establish activity..."
-curl -x http://localhost:8080 http://example.com
-
-echo "[3/6] Verifying CloudWatch metrics show recent activity..."
-aws cloudwatch get-metric-statistics --namespace Fluidity \
-    --metric-name LastActivityEpochSeconds --statistics Maximum
-
-echo "[4/6] Waiting for idle timeout (6 minutes)..."
-sleep 360
-
-echo "[5/6] Manually invoking Sleep Lambda..."
-aws lambda invoke --function-name FluiditySleepLambda output.json
-
-echo "[6/6] Verifying server stopped due to idle..."
-# Check ECS service DesiredCount=0
-
-echo "✓ Idle detection test passed!"
-```
-
-**EventBridge Scheduler Test:**
-```bash
-#!/bin/bash
-# tests/e2e/lambda_scheduler_test.sh
-
-echo "[1/4] Verifying EventBridge rules created..."
-aws events describe-rule --name FluiditySleepSchedule
-aws events describe-rule --name FluidityKillSchedule
-
-echo "[2/4] Testing Sleep schedule (rate: 5 minutes)..."
-# Verify rule is enabled and has correct target
-
-echo "[3/4] Testing Kill schedule (cron: daily at 11 PM UTC)..."
-# Verify rule is enabled and has correct target
-
-echo "[4/4] Manually triggering rules..."
-aws events put-events --entries file://test-event-sleep.json
-aws events put-events --entries file://test-event-kill.json
-
-echo "✓ EventBridge scheduler test passed!"
-```
-
-### Performance Tests
-
-Test Lambda cold start and response times:
-
-**Test Scenarios:**
-- Wake Lambda cold start latency (target: < 3 seconds)
-- Wake Lambda warm start latency (target: < 500ms)
-- Agent wake to connect time (target: < 90 seconds total)
+---
 
 ## Troubleshooting
 
-### Common Issues
+### Connection Refused Errors
 
-#### "Connection refused" errors
+**Cause:** Server not fully started
 
-**Cause**: Server not fully started before client attempts connection
+**Solution:**
+- Increase initialization wait in E2E scripts
+- Check port availability: `netstat -an | findstr :<port>`
+- Verify certificates exist
 
-**Solution**:
-- Increase initialization wait time in E2E scripts
-- Check if port is already in use: `netstat -an | findstr :<port>`
-- Verify certificates exist and are valid
+### Timeout Errors
 
-#### "Timeout" errors in integration tests
+**Cause:** Tests taking longer than expected
 
-**Cause**: Tests taking longer than expected, especially under load
-
-**Solution**:
-```powershell
+**Solution:**
+```bash
 # Increase timeout
 go test ./internal/integration/... -timeout 10m -v
 
-# Run tests sequentially instead of parallel
+# Run sequentially
 go test ./internal/integration/... -parallel 1 -v
 ```
 
-#### "Certificate invalid" errors
+### Certificate Invalid Errors
 
-**Cause**: Test certificates expired or improperly generated
+**Cause:** Expired or improperly generated certificates
 
-**Solution**:
-- Integration tests auto-generate certificates (no action needed)
-- For E2E tests, regenerate certificates:
-  ```powershell
-  # Windows
-  .\scripts\generate-certs.ps1
-  
-  # Linux/macOS
-  ./scripts/generate-certs.sh
-  ```
+**Solution:**
+```bash
+# Integration tests auto-generate certificates
+# For E2E tests, regenerate:
+./scripts/generate-certs.sh
+```
 
-#### Flaky integration tests
-
-**Cause**: Race conditions or improper synchronization
-
-**Solution**:
 ```powershell
+# Windows
+.\scripts\generate-certs.ps1
+```
+
+### Flaky Tests
+
+**Cause:** Race conditions
+
+**Solution:**
+```bash
 # Run with race detector
 go test ./internal/integration/... -race -v
 
-# Run specific test multiple times
+# Run test multiple times
 go test ./internal/integration -run TestTunnelConnection -count 10 -v
 ```
 
-#### E2E tests hang on cleanup
+### E2E Tests Hang on Cleanup
 
-**Cause**: Processes not terminating properly
+**Cause:** Processes not terminating
 
-**Solution**:
-- Check for orphaned processes:
-  ```powershell
-  # Windows
-  Get-Process | Where-Object {$_.ProcessName -like "*fluidity*"}
-  
-  # Linux/macOS
-  ps aux | grep fluidity
-  ```
-- Kill manually if needed:
-  ```powershell
-  # Windows
-  Stop-Process -Name "fluidity-*" -Force
-  
-  # Linux/macOS
-  killall fluidity-server fluidity-agent
-  ```
+**Solution:**
+```bash
+# Check for orphaned processes
+ps aux | grep fluidity
 
-#### Docker tests fail to build images
-
-**Cause**: Docker daemon not running or insufficient resources
-
-**Solution**:
-- Start Docker Desktop
-- Check Docker is running: `docker ps`
-- Increase Docker memory allocation (Settings → Resources)
-- Clean up old images: `docker system prune -a`
-
-### Debug Mode
-
-Run tests with verbose output:
+# Kill manually
+killall fluidity-server fluidity-agent
+```
 
 ```powershell
-# Unit tests with verbose output
+# Windows
+Get-Process | Where-Object {$_.ProcessName -like "*fluidity*"}
+Stop-Process -Name "fluidity-*" -Force
+```
+
+### Docker Tests Fail to Build
+
+**Cause:** Docker daemon not running or insufficient resources
+
+**Solution:**
+- Start Docker Desktop
+- Check: `docker ps`
+- Increase memory allocation (Settings → Resources)
+- Clean up: `docker system prune -a`
+
+---
+
+## Debug Mode
+
+```bash
+# Verbose output
 go test ./internal/shared/... -v -test.v
 
-# Integration tests with verbose output and log level
-go test ./internal/integration/... -v -test.v
-
-# E2E tests - check log files
+# Check E2E logs
 cat logs/server.log
 cat logs/agent.log
 ```
 
-### Performance Profiling
+---
 
-Profile slow tests:
+## Performance Profiling
 
-```powershell
+```bash
 # CPU profiling
 go test ./internal/integration/... -cpuprofile=cpu.out -v
 go tool pprof cpu.out
@@ -709,61 +511,64 @@ go test ./internal/integration/... -trace=trace.out -v
 go tool trace trace.out
 ```
 
+---
+
 ## Best Practices
 
 ### Writing New Tests
 
-1. **Use descriptive names**: `TestFeature_Scenario_ExpectedOutcome`
-2. **Add t.Parallel()**: For independent tests to run concurrently
-3. **Use t.Helper()**: In utility functions for better error reporting
-4. **Clean up resources**: Use `defer` or `t.Cleanup()`
-5. **Provide clear assertions**: Include descriptive error messages
-6. **Test error paths**: Don't just test the happy path
-7. **Use table-driven tests**: For testing multiple scenarios
+1. **Descriptive names:** `TestFeature_Scenario_ExpectedOutcome`
+2. **Use t.Parallel()** for independent tests
+3. **Use t.Helper()** in utility functions
+4. **Clean up resources:** `defer` or `t.Cleanup()`
+5. **Clear assertions:** Include descriptive error messages
+6. **Test error paths:** Don't just test happy path
+7. **Table-driven tests:** For multiple scenarios
 
-### Example Test Structure
+### Example Structure
 
 ```go
 func TestMyFeature(t *testing.T) {
-    t.Parallel() // Run in parallel with other tests
+    t.Parallel()
 
-    // Arrange - Set up test data and dependencies
+    // Arrange
     certs := GenerateTestCerts(t)
     server := StartTestServer(t, certs)
-    defer server.Stop() // Clean up
+    defer server.Stop()
 
-    // Act - Execute the feature under test
+    // Act
     result, err := server.DoSomething()
 
-    // Assert - Verify the outcome
+    // Assert
     AssertNoError(t, err, "operation should succeed")
-    AssertEqual(t, expected, result, "result should match")
+    AssertEqual(t, expected, result)
 }
 ```
 
-### Test Maintenance
+### Maintenance
 
 - Run tests before committing: `go test ./...`
-- Keep test execution fast (unit tests < 1s, integration < 10s)
+- Keep tests fast (unit < 1s, integration < 10s)
 - Update tests when changing functionality
-- Remove obsolete tests
-- Monitor test coverage: `go test ./... -cover`
+- Monitor coverage: `go test ./... -cover`
 
-## Additional Resources
-
-- **Architecture**: See `docs/architecture.md` for system design
-- **Error Handling**: See `docs/error-handling-improvements.md` for circuit breaker and retry details
-- **Integration Test README**: See `internal/integration/README.md` for integration test specifics
-- **Go Testing Docs**: https://golang.org/pkg/testing/
-- **Table-Driven Tests**: https://dave.cheney.net/2019/05/07/prefer-table-driven-tests
+---
 
 ## Summary
 
-Fluidity's testing strategy ensures:
-- ✅ Individual components work correctly (unit tests)
-- ✅ Components interact properly (integration tests)
-- ✅ Complete system functions as expected (E2E tests)
-- ✅ Changes can be validated quickly and confidently
+**Fluidity testing ensures:**
+- ✅ Individual components work correctly (unit)
+- ✅ Components interact properly (integration)
+- ✅ Complete system functions as expected (E2E)
+- ✅ Changes validated quickly and confidently
 - ✅ Production deployments are reliable
 
-**Run all tests regularly to maintain code quality and catch regressions early!**
+**Run all tests regularly to maintain code quality!**
+
+---
+
+## Related Documentation
+
+- **[Architecture](architecture.md)** - System design
+- **[Lambda Functions](lambda.md)** - Control plane testing
+- **[Deployment Guide](deployment.md)** - Deployment options

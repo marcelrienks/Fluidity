@@ -1,180 +1,108 @@
 # Docker Build and Deployment Guide
 
-This document explains Fluidity's Docker build process, networking considerations, and best practices for containerized deployment.
-
----
-
-## Table of Contents
-
-- [Build Process](#build-process)
-- [Image Architecture](#image-architecture)
-- [Local Testing Limitations](#local-testing-limitations)
-- [Production Deployment](#production-deployment)
-- [Networking Modes](#networking-modes)
-- [Troubleshooting](#troubleshooting)
+Docker-specific build process, networking, and troubleshooting for Fluidity.
 
 ---
 
 ## Build Process
 
-### Overview
+### Simplified Single-Stage Build
 
-Fluidity uses a **simplified single-stage Docker build** that compiles Go binaries locally and copies them into minimal Alpine containers.
+Fluidity compiles Go binaries **locally** and copies them into Alpine containers.
 
 ```
-Host Machine (Any OS)    →    Docker Container (Linux)
+Host Machine (Any OS)         Docker Container (Linux)
 ─────────────────────         ────────────────────────
-Go source code                Alpine Linux base
-  ↓                             ↓
-Static Linux binary          COPY binary
-(GOOS=linux)                 Add curl utility
-                             ~44MB total image
+Go source + modules      →    Pre-built static binary
+Static Linux binary      →    Alpine Linux (~5MB)
+                              curl utility (~3MB)
+                              Total: ~44MB
 ```
 
 ### Why This Approach?
 
-#### 1. Corporate Firewall Bypass
+**1. Corporate Firewall Bypass**
 
-**Problem**: Multi-stage Docker builds download Go modules and base images during build. Corporate firewalls often:
-- Block Docker Hub (docker.io) with 403 Forbidden errors
-- Intercept HTTPS traffic with their own certificates
-- Prevent access to Go module proxies (proxy.golang.org)
+Multi-stage builds fail in corporate environments:
+- Docker Hub blocked (403 Forbidden)
+- HTTPS traffic intercepted
+- Go module proxies unreachable
 
-**Solution**: Build everything locally before Docker starts:
-- Go modules downloaded on host (using corporate proxy settings)
-- Binary compiled with static linking (no dependencies)
-- Docker only needs to COPY files (no network calls)
+Solution: Build locally before Docker starts (no network calls during build).
 
-#### 2. Faster Builds
+**2. Faster Builds**
 
-- **Multi-stage**: ~10+ seconds (download base image, Go modules, compile)
-- **Single-stage**: ~2 seconds (copy pre-built binary to Alpine)
+- Multi-stage: ~10+ seconds (download modules, compile)
+- Single-stage: ~2 seconds (copy pre-built binary)
 
-#### 3. Platform Independence
+**3. Platform Independence**
 
-Works identically on:
-- Windows (PowerShell)
-- macOS (Bash/Zsh)
-- Linux (Bash)
-
-All build to the same Linux binary using cross-compilation.
+Works identically on Windows, macOS, and Linux via cross-compilation.
 
 ### Build Commands
 
-All Makefiles ensure the Linux binary is built before the Docker image:
+All Makefiles ensure Linux binary is built first:
+
+```bash
+# macOS/Linux
+make -f Makefile.macos docker-build-server
+make -f Makefile.macos docker-build-agent
+```
 
 ```powershell
 # Windows
-make -f Makefile.win docker-build-server  # Depends on build-linux-server
-make -f Makefile.win docker-build-agent   # Depends on build-linux-agent
+make -f Makefile.win docker-build-server
+make -f Makefile.win docker-build-agent
 ```
+
+### Build Flags
 
 ```bash
-# macOS
-make -f Makefile.macos docker-build-server
-make -f Makefile.macos docker-build-agent
-
-# Linux
-make docker-build-server
-make docker-build-agent
+GOOS=linux            # Target Linux OS
+GOARCH=amd64          # x86-64 architecture
+CGO_ENABLED=0         # Static linking (no C dependencies)
 ```
-
-### Build Targets
-
-**Example from Makefile.win:**
-```makefile
-build-linux-server:
-	@echo Building Linux binary for server...
-	$env:GOOS='linux'; $env:GOARCH='amd64'; $env:CGO_ENABLED='0'; go build -o build/fluidity-server ./cmd/server
-
-docker-build-server: build-linux-server
-	@echo Building Docker image for server...
-	docker build -f deployments/server/Dockerfile -t fluidity-server .
-```
-
-**Key flags:**
-- `GOOS=linux`: Target Linux OS
-- `GOARCH=amd64`: Target x86-64 architecture
-- `CGO_ENABLED=0`: Static linking (no C dependencies)
-
----
-
-## Image Architecture
-
-### Base Image: alpine/curl:latest
-
-We use `alpine/curl:latest` (~8MB) instead of plain `alpine` because:
-- Includes curl for health checks and testing
-- Still minimal (Alpine Linux is ~5MB, curl adds ~3MB)
-- Official Alpine-based image with security updates
 
 ### Dockerfile Structure
 
-**deployments/server/Dockerfile:**
 ```dockerfile
-FROM alpine/curl:latest
+FROM alpine/curl:latest        # ~8MB base with curl
 
 WORKDIR /app
 
-# Copy pre-built Linux binary
-COPY build/fluidity-server .
+COPY build/fluidity-server .   # Pre-built binary (~35MB)
 
-# Create directories for volume mounts
-RUN mkdir -p ./config ./certs
+RUN mkdir -p ./config ./certs  # Volume mount directories
 
-# Copy default config (can be overridden with volume mount)
 COPY configs/server.yaml ./config/
 
-# Expose tunnel port
 EXPOSE 8443
 
-# Run the server
 CMD ["./fluidity-server", "--config", "./config/server.yaml"]
 ```
 
-**deployments/agent/Dockerfile** follows the same pattern with:
-- `build/fluidity-agent`
-- `configs/agent.yaml`
-- Exposes port 8080
-
-### Image Sizes
-
-```
-REPOSITORY         TAG       SIZE
-fluidity-server    latest    43.8MB
-fluidity-agent     latest    43.9MB
-```
-
-Breakdown:
-- Alpine base: ~5MB
-- curl utility: ~3MB
-- Go binary: ~35MB (includes HTTP/HTTPS/WebSocket/TLS stack)
+**Image sizes:** Server ~44MB, Agent ~44MB
 
 ---
 
-## Local Testing Limitations
+## Local Testing
 
 ### Docker Desktop Networking
 
-**Challenge**: When running both server and agent as Docker containers on the same machine, they need to communicate with each other.
+**Challenge:** Containers need to communicate with each other on the same machine.
 
-**Windows/macOS Docker Desktop**:
-- Containers run in a lightweight VM (Hyper-V or WSL2)
-- To reach the host machine from a container, use `host.docker.internal`
-- This is a special DNS name that resolves to the host's IP
+**Solution:** Certificate generation scripts include `host.docker.internal` in SAN list by default.
 
-**Good News**: The certificate generation scripts (`scripts/generate-certs.ps1` and `scripts/generate-certs.sh`) now include `host.docker.internal` in the server certificate's Subject Alternative Names (SAN) **by default**. This means Docker containers work out of the box on Windows and macOS!
-
-**Certificate SANs (included by default)**:
+**Certificate SANs:**
 ```
 DNS.1 = fluidity-server
 DNS.2 = localhost
-DNS.3 = host.docker.internal  ✅ (Added for Docker Desktop support)
+DNS.3 = host.docker.internal  ✅ (Docker Desktop support)
 IP.1 = 127.0.0.1
 IP.2 = ::1
 ```
 
-**Verify your certificates include this:**
+**Verify certificates:**
 ```powershell
 # Windows
 openssl x509 -in .\certs\server.crt -noout -text | Select-String -Pattern "DNS:"
@@ -183,196 +111,184 @@ openssl x509 -in .\certs\server.crt -noout -text | Select-String -Pattern "DNS:"
 openssl x509 -in ./certs/server.crt -noout -text | grep DNS:
 ```
 
-**If you regenerated certificates before this update**, simply run the generation script again:
+### Run Containers Locally
+
+**Windows:**
+```powershell
+# Server
+docker run --rm `
+  -v ${PWD}\certs:/root/certs:ro `
+  -v ${PWD}\configs\server.docker.yaml:/root/config/server.yaml:ro `
+  -p 8443:8443 `
+  fluidity-server
+
+# Agent
+docker run --rm `
+  -v ${PWD}\certs:/root/certs:ro `
+  -v ${PWD}\configs\agent.docker.yaml:/root/config/agent.yaml:ro `
+  -p 8080:8080 `
+  fluidity-agent
+```
+
+**macOS/Linux:**
+```bash
+# Server
+docker run --rm \
+  -v "$(pwd)/certs:/root/certs:ro" \
+  -v "$(pwd)/configs/server.docker.yaml:/root/config/server.yaml:ro" \
+  -p 8443:8443 \
+  fluidity-server
+
+# Agent
+docker run --rm \
+  -v "$(pwd)/certs:/root/certs:ro" \
+  -v "$(pwd)/configs/agent.docker.yaml:/root/config/agent.yaml:ro" \
+  -p 8080:8080 \
+  fluidity-agent
+```
+
+**Config files:**
+- `server.docker.yaml`: Binds to `0.0.0.0` (all interfaces)
+- `agent.docker.yaml`: Connects to `host.docker.internal`
+
+### Test Containers
+
+```bash
+# macOS/Linux
+curl -x http://127.0.0.1:8080 http://example.com -I
+curl -x http://127.0.0.1:8080 https://example.com -I
+```
+
 ```powershell
 # Windows
-.\scripts\generate-certs.ps1
+curl.exe -x http://127.0.0.1:8080 http://example.com -I
+curl.exe -x http://127.0.0.1:8080 https://example.com -I --ssl-no-revoke
+```
 
-# macOS/Linux
-./scripts/generate-certs.sh
+**Expected:** `HTTP/1.1 200 OK`
+
+**Check logs:**
+```powershell
+docker logs <container-id>
 ```
 
 ### Recommended Testing Approach
 
-#### Use Windows Docker Configs (Now Works Out of the Box!)
-
-With the updated certificates, you can now test Docker containers locally on Windows/macOS without any issues:
-
+**For development:** Use local binaries (faster, simpler):
 ```powershell
-# Terminal 1 - Server (Windows)
-docker run --rm -v "${PWD}/certs:/root/certs:ro" -v "${PWD}/configs/server.windows-docker.yaml:/root/config/server.yaml:ro" -p 8443:8443 fluidity-server
-
-# Terminal 2 - Agent (Windows)
-docker run --rm -v "${PWD}/certs:/root/certs:ro" -v "${PWD}/configs/agent.windows-docker.yaml:/root/config/agent.yaml:ro" -p 8080:8080 fluidity-agent
-```
-
-```bash
-# macOS (same approach)
-docker run --rm -v "$(pwd)/certs:/root/certs:ro" -v "$(pwd)/configs/server.windows-docker.yaml:/root/config/server.yaml:ro" -p 8443:8443 fluidity-server
-
-docker run --rm -v "$(pwd)/certs:/root/certs:ro" -v "$(pwd)/configs/agent.windows-docker.yaml:/root/config/agent.yaml:ro" -p 8080:8080 fluidity-agent
-```
-
-**What these configs do:**
-- `server.windows-docker.yaml`: Binds to `0.0.0.0` (accessible from containers)
-- `agent.windows-docker.yaml`: Connects to `host.docker.internal` (reaches host machine)
-
-**Volume mounts:**
-- `/root/certs` - TLS certificates (matches Dockerfile WORKDIR /root/)
-- `/root/config` - Configuration files (relative paths in YAML resolve correctly)
-
-#### Alternative: Use Local Binaries
-
-For even faster iteration during development (instant startup, no container overhead):
-
-```powershell
-# Terminal 1
 make -f Makefile.win run-server-local
-
-# Terminal 2
 make -f Makefile.win run-agent-local
 ```
 
-**Benefits**:
-- No Docker networking complexity
-- Faster startup (~instant vs. container overhead)
-- Easier debugging (direct logs, no container inspection)
-- Lower resource usage
+**For Docker verification:** Use containers with `host.docker.internal` configs (pre-deployment check).
 
-#### Alternative: Custom Docker Network
+---
 
-If you prefer containers to communicate directly (without reaching through the host):
+## Networking Modes
+
+### Bridge (Default)
+
+```powershell
+docker run -p 8443:8443 fluidity-server
+```
+
+Isolated network with port forwarding. Requires `host.docker.internal` for container-to-container communication.
+
+### Custom Bridge Network
 
 ```powershell
 # Create network
 docker network create fluidity-net
 
 # Run server (named "fluidity-server")
-docker run --rm --name fluidity-server --network fluidity-net -v "${PWD}/certs:/root/certs:ro" -v "${PWD}/configs/server.yaml:/root/config/server.yaml:ro" -p 8443:8443 fluidity-server
+docker run --rm --name fluidity-server --network fluidity-net \
+  -v "$(pwd)/certs:/root/certs:ro" \
+  -v "$(pwd)/configs/server.yaml:/root/config/server.yaml:ro" \
+  -p 8443:8443 \
+  fluidity-server
 
 # Run agent (connects to "fluidity-server")
-docker run --rm --network fluidity-net -v "${PWD}/certs:/root/certs:ro" -v "${PWD}/configs/agent.yaml:/root/config/agent.yaml:ro" -p 8080:8080 fluidity-agent
+docker run --rm --network fluidity-net \
+  -v "$(pwd)/certs:/root/certs:ro" \
+  -v "$(pwd)/configs/agent.yaml:/root/config/agent.yaml:ro" \
+  -p 8080:8080 \
+  fluidity-agent
 ```
 
-**Note**: This works because the certificate includes `fluidity-server` in the SAN list, and Docker DNS resolves the container name to the correct IP.
+Containers communicate by name with automatic DNS. Works because certificate includes `fluidity-server` in SAN.
 
-### Testing Docker Containers
+### Host Network (Linux only)
 
-Once both containers are running, test end-to-end functionality:
-
-**Test HTTP:**
-```powershell
-# Windows
-curl.exe -x http://127.0.0.1:8080 http://example.com -I
-
-# macOS/Linux
-curl -x http://127.0.0.1:8080 http://example.com -I
+```bash
+docker run --network host fluidity-server
 ```
 
-**Expected output:**
-```
-HTTP/1.1 200 OK
-Content-Type: text/html
-...
-```
-
-**Test HTTPS:**
-```powershell
-# Windows
-curl.exe -x http://127.0.0.1:8080 https://example.com -I --ssl-no-revoke
-
-# macOS/Linux
-curl -x http://127.0.0.1:8080 https://example.com -I
-```
-
-**Expected output:**
-```
-HTTP/1.1 200 Connection Established
-
-HTTP/1.1 200 OK
-Content-Type: text/html
-...
-```
-
-**Check container logs:**
-```powershell
-# View server logs
-docker logs <server-container-id>
-
-# View agent logs
-docker logs <agent-container-id>
-```
-
-You should see debug logs showing:
-- Agent: `"Connected to tunnel server","addr":"host.docker.internal:8443"`
-- Server: `"CONNECT open request","address":"example.com:443"`
-- Both: Data transfer logs showing bytes sent/received
+Server uses host's network stack (no port mapping needed). Not available on Windows/macOS Docker Desktop.
 
 ---
 
-## Production Deployment
-
-### AWS Fargate / ECS
+## AWS Fargate/ECS
 
 In cloud environments, Docker networking is straightforward:
 
-**Why it works**:
-1. Containers use AWS VPC networking with private IPs
-2. ECS service discovery provides DNS names
-3. Certificates can include ECS service names in SAN list
-4. No `host.docker.internal` needed
+**Why it works:**
+- Containers use AWS VPC networking with private IPs
+- ECS service discovery provides DNS names
+- Certificates include ECS service names in SAN list
+- No `host.docker.internal` needed
 
-**Example**:
+**Example:**
 ```yaml
-# ECS Task Definition
 ServerDNS: fluidity-server.local
 Certificate SAN: fluidity-server.local
 Agent connects to: fluidity-server.local:8443 ✅
 ```
 
-**CloudFormation Template**: See `deployments/cloudformation/fargate.yaml` for complete setup.
+**Full setup:** See **[Fargate Guide](fargate.md)**
 
-### Configuration for CloudWatch Metrics
+---
 
-When deploying to AWS, the server can emit metrics to CloudWatch for monitoring and automated lifecycle management (see Lambda control plane in `docs/deployment.md` Option E).
+## CloudWatch Metrics (AWS Only)
 
-**Server Configuration (`server.yaml`):**
+### Server Configuration
+
 ```yaml
-server:
-  host: "0.0.0.0"
-  port: 8443
-  
-tls:
-  cert_file: "/certs/server.crt"
-  key_file: "/certs/server.key"
-  ca_file: "/certs/ca.crt"
-  
-metrics:
-  emit_metrics: true              # Enable CloudWatch metrics
-  metrics_interval: 60s           # Emit every 60 seconds
-  namespace: "Fluidity"           # CloudWatch namespace
-  service_name: "fluidity-server" # Service dimension
+# configs/server.yaml
+emit_metrics: true
+metrics_interval: "60s"
 ```
 
-**Environment Variables (Alternative):**
+**Environment variables (alternative):**
 ```bash
-# Can override config via environment variables
 FLUIDITY_METRICS_ENABLED=true
 FLUIDITY_METRICS_INTERVAL=60s
 FLUIDITY_NAMESPACE=Fluidity
 FLUIDITY_SERVICE_NAME=fluidity-server
 ```
 
-**Metrics Emitted:**
-- `ActiveConnections` (Gauge) - Current number of connected agents
-- `LastActivityEpochSeconds` (Timestamp) - Unix timestamp of last tunnel activity
+### Metrics Emitted
 
-**IAM Permissions Required:**
-- `cloudwatch:PutMetricData` on namespace `Fluidity`
+- `ActiveConnections`: Current agent count
+- `LastActivityEpochSeconds`: Unix timestamp of last activity
 
-**Viewing Metrics:**
+### IAM Permissions
+
+```json
+{
+  "Effect": "Allow",
+  "Action": "cloudwatch:PutMetricData",
+  "Resource": "*",
+  "Condition": {
+    "StringEquals": {
+      "cloudwatch:namespace": "Fluidity"
+    }
+  }
+}
+```
+
+### View Metrics
+
 ```bash
-# Check active connections
 aws cloudwatch get-metric-statistics \
   --namespace Fluidity \
   --metric-name ActiveConnections \
@@ -383,94 +299,36 @@ aws cloudwatch get-metric-statistics \
   --period 300
 ```
 
-For automated lifecycle management using these metrics, see `docs/deployment.md` Option E (Lambda control plane).
-
-### Best Practices
-
-1. **Secrets Management**: Use AWS Secrets Manager or SSM Parameter Store for certificates and keys (not baked into image)
-2. **Health Checks**: ECS can use curl to check `https://localhost:8443/health` (add health endpoint if needed)
-3. **Logging**: CloudWatch Logs integration (already in CloudFormation template)
-4. **Security Groups**: Restrict port 8443 to specific IP ranges
-5. **Cost Optimization**: Set `DesiredCount=0` when not in use (~$0.012/hour when running), or use Lambda control plane for automatic idle shutdown
-6. **Metrics**: Enable CloudWatch metrics for monitoring and automated lifecycle decisions
-
----
-
-## Networking Modes
-
-### Host Network Mode
-
-```powershell
-docker run --network host fluidity-server
-```
-
-**Use case**: Server runs with host's network stack (no port mapping needed)
-**Limitation**: Not available on Windows Docker Desktop (Linux only)
-
-### Bridge Network Mode (Default)
-
-```powershell
-docker run -p 8443:8443 fluidity-server
-```
-
-**Use case**: Isolated network with port forwarding
-**Limitation**: Container-to-container communication requires special DNS names
-
-### Custom Bridge Network
-
-```powershell
-docker network create fluidity-net
-docker run --network fluidity-net --name fluidity-server fluidity-server
-docker run --network fluidity-net fluidity-agent
-```
-
-**Use case**: Containers communicate by name with automatic DNS
-**Benefit**: Works with existing certificates (if `fluidity-server` is in SAN)
+**Use case:** Lambda control plane for automated lifecycle management. See **[Lambda Functions](lambda.md)**.
 
 ---
 
 ## Troubleshooting
 
-### "403 Forbidden" during Docker build
+### 403 Forbidden during Docker build
 
-**Symptom**:
+**Error:**
 ```
-ERROR [internal] load metadata for docker.io/library/golang:1.21-alpine
-> failed to solve with frontend dockerfile.v0: failed to create LLB definition: unexpected status from GET request to https://registry-1.docker.io/v2/library/golang/manifests/1.21-alpine: 403 Forbidden
+ERROR: failed to solve: failed to create LLB definition: 403 Forbidden
 ```
 
-**Cause**: Corporate firewall blocking Docker Hub
+**Cause:** Corporate firewall blocking Docker Hub
 
-**Solution**: Use the simplified build process (already implemented):
+**Solution:** Use simplified build (already implemented):
 ```powershell
 make -f Makefile.win docker-build-server  # Builds locally first
 ```
 
-### "UNAUTHORIZED: authentication required"
-
-**Symptom**:
-```
-denied: requested access to the resource is denied
-unauthorized: authentication required
-```
-
-**Cause**: Trying to pull from private registry without authentication
-
-**Solution**: Use `alpine/curl:latest` (public image) or authenticate:
-```powershell
-docker login
-```
-
 ### TLS certificate verification failed
 
-**Symptom**:
+**Error:**
 ```
 tls: failed to verify certificate: x509: certificate is valid for fluidity-server, localhost, not host.docker.internal
 ```
 
-**Cause**: Your certificates were generated before `host.docker.internal` was added to the default SAN list.
+**Cause:** Certificates generated before `host.docker.internal` was added to default SAN list
 
-**Solution**: Regenerate certificates with the updated script:
+**Solution:** Regenerate certificates:
 ```powershell
 # Windows
 .\scripts\generate-certs.ps1
@@ -479,20 +337,15 @@ tls: failed to verify certificate: x509: certificate is valid for fluidity-serve
 ./scripts/generate-certs.sh
 ```
 
-**Verify the fix:**
+**Verify:**
 ```powershell
-# Windows
-openssl x509 -in .\certs\server.crt -noout -text | Select-String -Pattern "DNS:"
-
-# macOS/Linux
 openssl x509 -in ./certs/server.crt -noout -text | grep DNS:
-
 # Should show: DNS:fluidity-server, DNS:localhost, DNS:host.docker.internal
 ```
 
 ### Container starts but immediately exits
 
-**Debug**:
+**Debug:**
 ```powershell
 # Check logs
 docker logs <container-id>
@@ -500,50 +353,61 @@ docker logs <container-id>
 # Run with interactive shell
 docker run -it --entrypoint /bin/sh fluidity-server
 
-# Inside container:
-ls -la  # Check binary exists
-./fluidity-server --help  # Test binary
-cat ./config/server.yaml  # Check config
+# Inside container
+ls -la                        # Check binary exists
+./fluidity-server --help      # Test binary
+cat ./config/server.yaml      # Check config
 ```
 
 ### Permission denied on binary
 
-**Symptom**:
+**Error:**
 ```
 /bin/sh: ./fluidity-server: Permission denied
 ```
 
-**Cause**: Binary not executable (rare with COPY, but possible)
-
-**Solution**: Add to Dockerfile after COPY:
+**Solution:** Add to Dockerfile after COPY:
 ```dockerfile
 RUN chmod +x ./fluidity-server
 ```
 
 ### Volume mount issues (Windows)
 
-**Symptom**:
+**Error:**
 ```
-Error response from daemon: invalid mount config for type "bind": bind source path does not exist
+Error: bind source path does not exist
 ```
 
-**Solution**: Use `${PWD}` with forward slashes or absolute paths:
+**Solution:** Use `${PWD}` with forward slashes:
 ```powershell
 docker run -v "${PWD}/certs:/app/certs:ro" fluidity-server
 ```
 
 ---
 
+## Production Best Practices
+
+1. **Secrets Management:** Use AWS Secrets Manager or SSM Parameter Store for certificates/keys (not baked into image)
+2. **Health Checks:** ECS can use curl to check server health
+3. **Logging:** CloudWatch Logs integration (in CloudFormation template)
+4. **Security Groups:** Restrict port 8443 to specific IP ranges
+5. **Cost Optimization:** Use Lambda control plane for automatic idle shutdown
+6. **Metrics:** Enable CloudWatch metrics for monitoring
+
+**CloudFormation template:** See `deployments/cloudformation/fargate.yaml`
+
+---
+
 ## Summary
 
-**For Local Development**:
-- Use local binaries (`make run-server-local`, `make run-agent-local`)
-- Faster, simpler, no Docker networking complexity
+**Local Development:**
+- Use local binaries (faster iteration)
+- Docker for pre-deployment verification
 
-**For Cloud Deployment**:
-- Docker images are production-ready (~44MB, Alpine-based)
+**Cloud Deployment:**
+- Docker images are production-ready (~44MB)
 - Build process bypasses corporate firewalls
 - Works seamlessly with AWS Fargate/ECS
-- Use CloudFormation template for infrastructure-as-code
+- Use CloudFormation for infrastructure-as-code
 
-**Key Insight**: Docker's power is in production deployment portability, not local development convenience. Use the right tool for the right job.
+**Key Insight:** Docker's power is in production portability, not local development convenience.

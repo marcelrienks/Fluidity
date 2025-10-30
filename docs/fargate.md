@@ -1,60 +1,37 @@
-# AWS Fargate Deployment Plan — Fluidity Server
+# AWS Fargate Deployment Guide
 
-This guide describes how to deploy the Fluidity Tunnel Server to AWS using ECS on Fargate. It focuses on simplicity, pay‑per‑use operation (start/stop on demand), and minimal AWS footprint.
+Deploy Fluidity server to AWS ECS using Fargate for pay-per-use operation.
 
 ---
 
-## Goals
+## Overview
 
-- Run the Fluidity server Docker image on AWS without managing EC2 instances
-- Keep costs near-zero when not in use by setting desired count to 0
-- Expose port 8443 over the Internet with tight security group rules
-- Keep logs in CloudWatch
-- Make daily usage simple via start/stop scripts that also output the public IP
+**Goals:**
+- Run server on AWS without managing EC2 instances
+- Pay only when running (set desired count to 0 when idle)
+- Expose port 8443 with secure access
+- Simple start/stop workflow
+
+**Architecture:**
+- ECS Cluster (Fargate launch type)
+- Task Definition (0.25 vCPU, 512 MB RAM)
+- Service with desired count toggle (0 = stopped, 1 = running)
+- Public subnet with public IP
+- Security Group restricting port 8443
+- CloudWatch Logs
 
 ---
 
 ## Prerequisites
 
-- AWS account with permissions for ECR, ECS, EC2 (VPC/subnets/SG), IAM, CloudWatch Logs
-- AWS CLI v2 configured (`aws configure`)
-- Docker installed locally
-- Private image for the server (built from this repo)
-  - Recommended: use the existing Dockerfile in `deployments/server/Dockerfile`
-  - Or Makefile target: `make -f Makefile.win docker-build-server` (or macOS/Linux Makefiles)
-- Certificates and config ready (see `certs/` and `configs/server.*.yaml`)
-
-Security note: For personal use you may bake certs/configs into the image for simplicity. Prefer using AWS Secrets Manager or SSM Parameter Store for sensitive materials if you plan to share or harden this.
+- AWS account with ECR, ECS, EC2, IAM, CloudWatch permissions
+- AWS CLI v2 configured
+- Docker installed
+- Server Docker image built (see **[Docker Guide](docker.md)**)
 
 ---
 
-## Architecture Overview
-
-- ECS Cluster (Fargate launch type)
-- Task Definition `fluidity-server` (0.25 vCPU, 512MB RAM)
-- Service with desired count toggled between 0 and 1
-- Networking: default VPC, public subnets, assign public IP
-- Security group inbound TCP 8443 from your workstation’s public IP (restrictive), or 0.0.0.0/0 for testing only
-- CloudWatch Logs for container stdout/stderr
-
-Sequence:
-1) Push image to ECR
-2) Create IAM roles, log group, network (SG)
-3) Register task definition
-4) Create service (desired count 0)
-5) Start on demand (desired count 1), fetch task public IP
-6) Use that IP in the Agent `--server-ip` (or config)
-7) Stop when done (desired count 0)
-
----
-
-## Image Build and Push (ECR)
-
-- Create an ECR repository (one‑time)
-- Build the server image using existing Makefile or Dockerfile
-- Tag and push the image to ECR
-
-Example outline (replace REGION/ACCOUNT):
+## Step 1: Build and Push Image to ECR
 
 ```powershell
 # Create ECR repository (one-time)
@@ -63,45 +40,41 @@ aws ecr create-repository --repository-name fluidity-server
 # Authenticate Docker to ECR
 aws ecr get-login-password --region <REGION> | docker login --username AWS --password-stdin <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com
 
-# Build, tag, push
-# Option A (Makefile):
-# make -f Makefile.win docker-build-server
-# docker tag fluidity-server:latest <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/fluidity-server:latest
-
-# Option B (Dockerfile only):
-# docker build -t fluidity-server -f deployments/server/Dockerfile .
+# Build, tag, and push
+make -f Makefile.win docker-build-server
 docker tag fluidity-server:latest <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/fluidity-server:latest
 docker push <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/fluidity-server:latest
 ```
 
 ---
 
-## IAM, Networking, and Logs
+## Step 2: Create IAM, Networking, and Logs
 
-- Task execution role: use managed `ecsTaskExecutionRole` (grants pull from ECR, write logs)
-- Task role: not required unless accessing other AWS services from the container
-- Log group: create `/fluidity/server` in CloudWatch Logs (or let ECS create on first run)
-- VPC & Subnets: use default VPC with at least one public subnet
-- Security Group: inbound TCP 8443 from your current public IP (recommended), or 0.0.0.0/0 for testing
-
+**CloudWatch Log Group:**
 ```powershell
-# Create CloudWatch log group (optional)
 aws logs create-log-group --log-group-name /fluidity/server
+```
 
-# Create a security group (in default VPC); note the VPC id if you have multiple VPCs
+**Security Group:**
+```powershell
+# Get default VPC ID
 $defaultVpcId = (aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text)
+
+# Create security group
 $sgId = aws ec2 create-security-group --group-name fluidity-sg --description "Fluidity server SG" --vpc-id $defaultVpcId --query 'GroupId' --output text
 
-# Allow inbound 8443 only from your current public IP (replace x.x.x.x/32)
+# Allow port 8443 from your IP only (replace x.x.x.x/32)
 aws ec2 authorize-security-group-ingress --group-id $sgId --protocol tcp --port 8443 --cidr x.x.x.x/32
 ```
 
+**IAM Role:**
+Use AWS managed `ecsTaskExecutionRole` (grants ECR pull and CloudWatch Logs write).
+
 ---
 
-## Task Definition (Fargate)
+## Step 3: Create Task Definition
 
-Minimal example (save as `task-definition.json` and register):
-
+**task-definition.json:**
 ```json
 {
   "family": "fluidity-server",
@@ -134,26 +107,23 @@ Minimal example (save as `task-definition.json` and register):
 }
 ```
 
-Register the task definition (example):
-
+**Register:**
 ```powershell
 aws ecs register-task-definition --cli-input-json file://task-definition.json
 ```
 
 ---
 
-## ECS Cluster and Service
-
-Create a cluster (one‑time), then a service referencing the task definition. Use public subnets and the security group created earlier, and enable `assignPublicIp`.
+## Step 4: Create ECS Cluster and Service
 
 ```powershell
-# Create or reuse an ECS cluster
+# Create cluster
 aws ecs create-cluster --cluster-name fluidity
 
-# Get one or more public subnet ids from default VPC
+# Get public subnet IDs
 $subnetIds = aws ec2 describe-subnets --filters Name=vpc-id,Values=$defaultVpcId Name=defaultForAz,Values=true --query 'Subnets[].SubnetId' --output text
 
-# Create service with desired count 0 (off by default)
+# Create service (desired count 0 = stopped by default)
 aws ecs create-service `
   --cluster fluidity `
   --service-name fluidity-server `
@@ -165,14 +135,13 @@ aws ecs create-service `
 
 ---
 
-## Start/Stop On Demand + Retrieve Public IP
+## Step 5: Start/Stop On Demand
 
-Start when needed (desired count = 1), wait ~60 seconds for cold start, retrieve the task’s ENI public IP, then configure the Agent with `--server-ip`.
+### Start Server and Get Public IP
 
-PowerShell (save as `scripts/start-cloud-server.ps1`):
-
+**PowerShell (scripts/start-cloud-server.ps1):**
 ```powershell
-Write-Host "Starting Fluidity server in AWS..."
+Write-Host "Starting Fluidity server..."
 aws ecs update-service --cluster fluidity --service fluidity-server --desired-count 1 | Out-Null
 
 Write-Host "Waiting for server to start (60 seconds)..."
@@ -188,32 +157,22 @@ $publicIp = aws ec2 describe-network-interfaces --network-interface-ids $eniId `
   --query 'NetworkInterfaces[0].Association.PublicIp' --output text
 
 Write-Host "Server started. Public IP: $publicIp"
-Write-Host "Tip: Run agent with: .\\build\\fluidity-agent --config .\\configs\\agent.local.yaml --server-ip $publicIp"
+Write-Host "Run agent: .\build\fluidity-agent --config .\configs\agent.local.yaml --server-ip $publicIp"
 ```
 
-Stop (save as `scripts/stop-cloud-server.ps1`):
-
-```powershell
-Write-Host "Stopping Fluidity server..."
-aws ecs update-service --cluster fluidity --service fluidity-server --desired-count 0 | Out-Null
-Write-Host "Server stopped. Billing paused."
-```
-
-Bash equivalents (optional):
-
+**Bash (scripts/start-cloud-server.sh):**
 ```bash
-# scripts/start-cloud-server.sh
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "Starting Fluidity server in AWS..."
+echo "Starting Fluidity server..."
 aws ecs update-service --cluster fluidity --service fluidity-server --desired-count 1 >/dev/null
 
 echo "Waiting for server to start (60 seconds)..."
 sleep 60
 
 TASK_ARN=$(aws ecs list-tasks --cluster fluidity --service-name fluidity-server --query 'taskArns[0]' --output text)
-if [[ -z "$TASK_ARN" || "$TASK_ARN" == "None" ]]; then echo "No running task found"; exit 1; fi
+[[ -z "$TASK_ARN" || "$TASK_ARN" == "None" ]] && { echo "No running task found"; exit 1; }
 
 ENI_ID=$(aws ecs describe-tasks --cluster fluidity --tasks "$TASK_ARN" \
   --query 'tasks[0].attachments[0].details[?name==`networkInterfaceId`].value' --output text)
@@ -221,11 +180,20 @@ PUBLIC_IP=$(aws ec2 describe-network-interfaces --network-interface-ids "$ENI_ID
   --query 'NetworkInterfaces[0].Association.PublicIp' --output text)
 
 echo "Server started. Public IP: $PUBLIC_IP"
-echo "Run agent with: ./build/fluidity-agent --config ./configs/agent.local.yaml --server-ip $PUBLIC_IP"
+echo "Run agent: ./build/fluidity-agent --config ./configs/agent.local.yaml --server-ip $PUBLIC_IP"
 ```
 
+### Stop Server
+
+**PowerShell (scripts/stop-cloud-server.ps1):**
+```powershell
+Write-Host "Stopping Fluidity server..."
+aws ecs update-service --cluster fluidity --service fluidity-server --desired-count 0 | Out-Null
+Write-Host "Server stopped. Billing paused."
+```
+
+**Bash (scripts/stop-cloud-server.sh):**
 ```bash
-# scripts/stop-cloud-server.sh
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -236,206 +204,13 @@ echo "Server stopped. Billing paused."
 
 ---
 
-## Handling Dynamic IPs
+## CloudFormation Deployment (Alternative)
 
-By default a Fargate task gets a new public IP each time it starts. Options:
-- Simple (recommended personal use): fetch the IP after start (scripts above) and pass `--server-ip <IP>` to the Agent; persist it in your agent config once verified.
-- Network Load Balancer + static endpoint: Put the service behind an NLB with TCP listener 8443; adds cost/complexity but keeps a stable endpoint.
-- Elastic IP via NAT/LB: Requires additional architecture; not necessary for personal on‑demand use.
+For repeatable infrastructure, use the CloudFormation template.
 
----
+**Template:** `deployments/cloudformation/fargate.yaml`
 
-## Security Recommendations
-
-- Restrict Security Group ingress on 8443 to your current public IP
-- Keep mTLS enforced (already in Fluidity)
-- Rotate certificates periodically; keep private keys out of public repos
-- If baking certs into the image, keep ECR private and least‑privilege access
-- Set CloudWatch Logs retention (e.g., 7–30 days) and avoid logging sensitive data
-
----
-
-## Lambda Control Plane Integration (Optional)
-
-For automated lifecycle management and cost optimization, you can integrate the Fargate deployment with AWS Lambda functions that control the ECS service based on activity metrics. This is recommended for production deployments.
-
-### Architecture Overview
-
-The Lambda control plane provides three key capabilities:
-1. **Wake Lambda** - Starts the ECS service when agents need connectivity
-2. **Sleep Lambda** - Stops the service after idle period to minimize costs
-3. **Kill Lambda** - Emergency shutdown endpoint
-
-### Key Components
-
-**CloudWatch Metrics:**
-The server emits custom metrics to CloudWatch (namespace: `Fluidity`):
-- `ActiveConnections` - Current number of connected agents
-- `LastActivityEpochSeconds` - Unix timestamp of last activity
-
-**Server Configuration:**
-Enable metrics in `server.yaml`:
-```yaml
-server:
-  host: "0.0.0.0"
-  port: 8443
-  
-metrics:
-  emit_metrics: true          # Enable CloudWatch metrics
-  metrics_interval: 60s       # Emit every 60 seconds
-  namespace: "Fluidity"       # CloudWatch namespace
-  service_name: "fluidity-server"
-```
-
-**Agent Configuration:**
-Configure lifecycle integration in `agent.yaml`:
-```yaml
-agent:
-  proxy_port: 8080
-  server_ip: "<task-public-ip>"
-  server_port: 8443
-  
-lifecycle:
-  wake_endpoint: "https://<api-gateway-url>/wake"
-  kill_endpoint: "https://<api-gateway-url>/kill"
-  api_key: "<api-gateway-key>"
-  wake_timeout: 90s           # Retry connection for 90 seconds
-  wake_retry_interval: 5s     # Check every 5 seconds
-```
-
-**EventBridge Schedulers:**
-- **Sleep Schedule**: `rate(5 minutes)` - Periodically checks if service is idle
-- **Kill Schedule**: `cron(0 23 * * ? *)` - Daily shutdown at 11 PM UTC
-
-### Deployment
-
-1. **Deploy Fargate infrastructure first** (this guide or `fargate.yaml`)
-
-2. **Deploy Lambda control plane** (see `docs/deployment.md` Option E):
-```bash
-# Create lambda.yaml CloudFormation stack
-aws cloudformation deploy \
-  --template-file deployments/cloudformation/lambda.yaml \
-  --stack-name fluidity-lambda \
-  --parameter-overrides \
-      EcsClusterName=fluidity-cluster \
-      EcsServiceName=fluidity-server \
-      IdleThresholdMinutes=5 \
-  --capabilities CAPABILITY_IAM
-```
-
-3. **Update server configuration** with CloudWatch metrics enabled
-
-4. **Update agent configuration** with wake/kill endpoints from API Gateway
-
-### Monitoring
-
-**View CloudWatch Metrics:**
-```bash
-# Check active connections
-aws cloudwatch get-metric-statistics \
-  --namespace Fluidity \
-  --metric-name ActiveConnections \
-  --dimensions Name=ServiceName,Value=fluidity-server \
-  --statistics Maximum \
-  --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S) \
-  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
-  --period 300
-
-# Check last activity timestamp
-aws cloudwatch get-metric-statistics \
-  --namespace Fluidity \
-  --metric-name LastActivityEpochSeconds \
-  --dimensions Name=ServiceName,Value=fluidity-server \
-  --statistics Maximum \
-  --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S) \
-  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
-  --period 300
-```
-
-**Test Lambda Functions:**
-```bash
-# Manually trigger wake
-curl -X POST https://<api-gateway-url>/wake \
-  -H "x-api-key: <your-api-key>"
-
-# Check ECS service status
-aws ecs describe-services \
-  --cluster fluidity-cluster \
-  --services fluidity-server \
-  --query 'services[0].desiredCount'
-
-# Manually trigger kill
-curl -X POST https://<api-gateway-url>/kill \
-  -H "x-api-key: <your-api-key>"
-```
-
-### Cost Impact
-
-With Lambda control plane automation:
-- **Idle periods**: $0/hour (service stopped)
-- **Active periods**: $0.012/hour (Fargate running)
-- **Lambda costs**: ~$0.20-$0.50/month (minimal invocations)
-- **Total**: $0.55-$3.05/month vs $3-$9/month for manual management
-
-For complete Lambda deployment guide, see `docs/deployment.md` Option E.
-
----
-
-## Costs (rough order of magnitude)
-
-Fargate (0.25 vCPU, 0.5 GB): ~ $0.012/hour
-- 2 hours/day, 20 days/month ≈ $0.50/month
-- 8 hours/day, 20 days/month ≈ $3.00/month
-Always‑on 24/7: ≈ $9/month
-
-CloudWatch, ECR storage, data transfer may add small additional costs.
-
-**With Lambda Control Plane:**
-- Lambda invocations: ~$0.20-$0.50/month
-- API Gateway: ~$0.03/month (10,000 requests free tier)
-- Total: $0.55-$3.05/month (automatic idle shutdown)
-
----
-
-## Troubleshooting
-
-- Task stuck in PENDING: check subnets are public, `assignPublicIp=ENABLED`, SG allows 8443, and your account has Fargate quotas in the region
-- Can’t connect: confirm SG ingress from your current IP; verify server is listening on 8443 inside the container
-- No logs: confirm `awslogs` log driver options and log group exist
-- TLS errors: verify CA and server certificates match; server uses the correct cert files
-
----
-
-## Deploy with CloudFormation
-
-You can provision the full Fargate setup via a single CloudFormation stack: see `deployments/cloudformation/fargate.yaml`.
-
-### Creates
-- ECS Cluster (Fargate)
-- IAM execution role for tasks (`AmazonECSTaskExecutionRolePolicy`)
-- CloudWatch Log Group (default `/fluidity/server`)
-- Security Group with inbound TCP on the chosen port (default 8443)
-- ECS Task Definition (CPU/Memory, logging, environment)
-- ECS Service (desired count default 0)
-
-It does not create an ECR repo or push the image. Build and push the image first and pass the ECR image URI to the stack.
-
-### Required parameters
-- `ContainerImage`: ECR URI, for example `123456789012.dkr.ecr.us-east-1.amazonaws.com/fluidity-server:latest`
-- `VpcId`: VPC ID
-- `PublicSubnets`: One or more public subnet IDs (comma-separated in params file)
-
-### Optional parameters (defaults)
-- `ClusterName` (fluidity), `ServiceName` (fluidity-server)
-- `ContainerPort` (8443), `Cpu` (256), `Memory` (512)
-- `DesiredCount` (0), `AllowedIngressCidr` (0.0.0.0/0)
-- `AssignPublicIp` (ENABLED), `LogGroupName` (/fluidity/server), `LogRetentionDays` (14)
-
-### Example params file
-
-Save as `deployments/cloudformation/params.json`:
-
+**Parameters file (deployments/cloudformation/params.json):**
 ```json
 [
   { "ParameterKey": "ClusterName", "ParameterValue": "fluidity" },
@@ -445,8 +220,8 @@ Save as `deployments/cloudformation/params.json`:
   { "ParameterKey": "Cpu", "ParameterValue": "256" },
   { "ParameterKey": "Memory", "ParameterValue": "512" },
   { "ParameterKey": "DesiredCount", "ParameterValue": "0" },
-  { "ParameterKey": "VpcId", "ParameterValue": "vpc-0abcd1234ef567890" },
-  { "ParameterKey": "PublicSubnets", "ParameterValue": "subnet-0123abcd,subnet-0456efgh" },
+  { "ParameterKey": "VpcId", "ParameterValue": "vpc-xxxxx" },
+  { "ParameterKey": "PublicSubnets", "ParameterValue": "subnet-xxxxx,subnet-yyyyy" },
   { "ParameterKey": "AllowedIngressCidr", "ParameterValue": "x.x.x.x/32" },
   { "ParameterKey": "AssignPublicIp", "ParameterValue": "ENABLED" },
   { "ParameterKey": "LogGroupName", "ParameterValue": "/fluidity/server" },
@@ -454,36 +229,20 @@ Save as `deployments/cloudformation/params.json`:
 ]
 ```
 
-Tip: Replace `x.x.x.x/32` with your current public IP to restrict access.
-
-### Create/Update the stack (PowerShell)
-
+**Deploy:**
 ```powershell
-$stackName = "fluidity-fargate"
-
-# Create/update stack
 aws cloudformation deploy `
   --template-file deployments/cloudformation/fargate.yaml `
-  --stack-name $stackName `
+  --stack-name fluidity-fargate `
   --parameter-overrides (Get-Content deployments/cloudformation/params.json | Out-String) `
   --capabilities CAPABILITY_NAMED_IAM
-
-# Check status
-aws cloudformation describe-stacks --stack-name $stackName `
-  --query 'Stacks[0].StackStatus'
-
-# Outputs
-aws cloudformation describe-stacks --stack-name $stackName `
-  --query 'Stacks[0].Outputs'
 ```
 
-### Start/Stop via stack updates
-
-Update only the `DesiredCount` parameter (1 to start, 0 to stop):
-
+**Start/Stop:**
 ```powershell
+# Start
 aws cloudformation update-stack `
-  --stack-name $stackName `
+  --stack-name fluidity-fargate `
   --use-previous-template `
   --parameters ParameterKey=DesiredCount,ParameterValue=1 `
                ParameterKey=ClusterName,UsePreviousValue=true `
@@ -498,52 +257,256 @@ aws cloudformation update-stack `
                ParameterKey=AssignPublicIp,UsePreviousValue=true `
                ParameterKey=LogGroupName,UsePreviousValue=true `
                ParameterKey=LogRetentionDays,UsePreviousValue=true
-```
 
-Note: The task’s public IP is assigned at runtime and can’t be output directly by CloudFormation; use the start script to retrieve it.
+# Stop (set DesiredCount to 0)
+```
 
 ---
 
-## Appendix: Full Task Definition (with env + logs)
+## Dynamic IP Handling
 
+Fargate tasks get new public IPs on each start.
+
+**Options:**
+1. **Simple (recommended for personal use):** Fetch IP after start (scripts above) and pass to agent via `--server-ip`
+2. **Network Load Balancer:** Adds static endpoint but increases cost/complexity
+3. **Elastic IP via NAT:** Requires additional architecture
+
+For most use cases, option 1 is sufficient.
+
+---
+
+## Lambda Control Plane Integration
+
+For automated lifecycle management with cost optimization, integrate with Lambda functions to automatically wake/sleep/kill Fargate tasks based on demand.
+
+### Overview
+
+**Architecture:**
+- **Wake Lambda:** Called by agent on startup → sets ECS service desired count to 1
+- **Sleep Lambda:** EventBridge scheduler (every 5 min by default) → analyzes CloudWatch metrics → scales down if idle
+- **Kill Lambda:** Called by agent on shutdown OR scheduled daily termination
+
+**Benefits:**
+- Automatic idle detection and cost savings (server stops when not in use)
+- On-demand startup (agent triggers wake, server starts within 90 seconds)
+- Graceful shutdown
+- Scheduled daily kill for resource cleanup
+
+### Prerequisites
+
+- Fargate infrastructure deployed (see steps 1-4 above)
+- Lambda stack deployed via CloudFormation (`lambda.yaml`)
+- Server configured to emit CloudWatch metrics
+- Agent configured with Lambda API endpoints
+
+### Configuration
+
+**Step 1: Enable Metrics Emission**
+
+Server (`configs/server.yaml`):
+```yaml
+# Enable CloudWatch metrics
+emit_metrics: true
+metrics_interval: "60s"  # Emit every 60 seconds
+```
+
+**Step 2: Update Fargate IAM Role**
+
+The Fargate task execution role must have `CloudWatch:PutMetricData` permission.
+
+Update your Fargate CloudFormation template or IAM policy:
 ```json
 {
-  "family": "fluidity-server",
-  "networkMode": "awsvpc",
-  "requiresCompatibilities": ["FARGATE"],
-  "cpu": "256",
-  "memory": "512",
-  "executionRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/ecsTaskExecutionRole",
-  "containerDefinitions": [
+  "Version": "2012-10-17",
+  "Statement": [
     {
-      "name": "server",
-      "image": "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/fluidity-server:latest",
-      "essential": true,
-      "portMappings": [
-        { "containerPort": 8443, "hostPort": 8443, "protocol": "tcp" }
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:PutMetricData"
       ],
-      "environment": [
-        { "name": "FLUIDITY_LOG_LEVEL", "value": "info" }
-      ],
-      "logConfiguration": {
-        "logDriver": "awslogs",
-        "options": {
-          "awslogs-group": "/fluidity/server",
-          "awslogs-region": "<REGION>",
-          "awslogs-stream-prefix": "ecs"
-        }
-      }
+      "Resource": "*"
     }
   ]
 }
 ```
 
-Replace `<ACCOUNT_ID>` and `<REGION>`; adjust resources and options as needed.
+**Step 3: Configure Agent**
+
+Agent (`configs/agent.yaml`):
+```yaml
+lifecycle:
+  enabled: true
+  wake_api_endpoint: "https://xxx.execute-api.us-east-1.amazonaws.com/prod/wake"
+  kill_api_endpoint: "https://xxx.execute-api.us-east-1.amazonaws.com/prod/kill"
+  api_key: "${LAMBDA_API_KEY}"  # Set via environment variable
+  connection_timeout: "90s"      # Wait up to 90s for server to wake
+  connection_retry_interval: "5s" # Retry every 5s during wake
+  connection_max_retries: 20     # 20 * 5s = ~100s max wait
+```
+
+**Step 4: Deploy Lambda Stack**
+
+```powershell
+# Deploy Lambda functions and API Gateway
+./scripts/deploy-fluidity.ps1 lambda
+```
+
+This creates:
+- Lambda functions (Wake, Sleep, Kill)
+- API Gateway with authentication
+- EventBridge scheduler for Sleep Lambda (5 min interval)
+- CloudWatch alarms for Lambda errors
+- SNS topic for email alerts
+
+### Lifecycle Flow
+
+**Agent Startup:**
+1. Agent calls Wake Lambda via API Gateway
+2. Wake Lambda sets ECS service desired count to 1
+3. Fargate task starts (30-60 seconds)
+4. Agent retries connection every 5 seconds (timeout: 90s)
+5. Server starts and emits metrics to CloudWatch
+6. Agent connects and begins tunneling
+
+**Idle Detection:**
+1. EventBridge triggers Sleep Lambda every 5 minutes
+2. Sleep Lambda queries CloudWatch metrics for last activity
+3. If idle > 10 minutes (configurable), scales down to 0
+4. Fargate task terminates
+5. Billing pauses
+
+**Agent Shutdown:**
+1. Agent calls Kill Lambda via API Gateway
+2. Kill Lambda performs graceful shutdown
+3. Fargate task terminates cleanly
+
+**Scheduled Kill:**
+1. Kill Lambda runs on daily schedule (default: 11 PM UTC)
+2. Terminates any running tasks regardless of activity
+3. Useful for resource cleanup and cost control
+
+### Monitoring
+
+**CloudWatch Dashboard:**
+View Lambda invocations, errors, duration, and Fargate metrics at a glance.
+
+**CloudWatch Alarms:**
+- **WakeLambdaErrorAlarm**: Notifies if Wake fails (SNS email)
+- **SleepLambdaErrorAlarm**: Notifies if Sleep fails (SNS email)
+- **KillLambdaErrorAlarm**: Notifies if Kill fails (SNS email)
+
+**Logs:**
+- Lambda logs: CloudWatch Logs → `/aws/lambda/fluidity-wake`, etc.
+- Fargate logs: CloudWatch Logs → `/fluidity/server`
+
+### Cost Optimization
+
+**Lambda costs:** < $0.05/month (millions of invocations free tier, then $0.20 per million)
+
+**Total monthly cost (with Lambda control plane):**
+- 2 hours/day usage: ~$0.55/month
+- 8 hours/day usage: ~$3.05/month
+- 24/7 usage: ~$9.05/month
+- With auto-idle: Saves 50-90% depending on usage pattern
+
+**Example:** 2 hours/day with auto-idle (avg 30 min idle per session) = ~$0.30/month
+
+### Troubleshooting
+
+**Wake Lambda fails:**
+- Check IAM role has `ecs:UpdateService` permission
+- Verify API key is correct
+- Check CloudWatch Logs for Lambda errors
+- Ensure cluster/service names match Lambda configuration
+
+**Sleep Lambda never fires:**
+- Verify EventBridge rule is enabled
+- Check EventBridge target Lambda is active
+- Monitor CloudWatch Logs for Sleep Lambda
+- Verify server is emitting metrics (`emit_metrics: true`)
+
+**Agent can't connect after wake:**
+- Confirm server is starting (check ECS task status)
+- Verify agent connection timeout is >= 60s
+- Check CloudWatch Logs (`/fluidity/server`) for startup errors
+- Verify security group allows port 8443
+
+**Metrics not appearing in CloudWatch:**
+- Verify `emit_metrics: true` in server config
+- Check Fargate IAM role has `cloudwatch:PutMetricData` permission
+- Confirm server is running and healthy
+- Check `/fluidity/server` logs for metric emission errors
+
+### Full Documentation
+
+**See:** **[Lambda Functions Guide](lambda.md)** - Complete Lambda setup, configuration, and troubleshooting
+
+**See:** **[Infrastructure as Code](infrastructure.md)** - CloudFormation template details
 
 ---
 
-## What’s Next
+## Costs
 
-- Optionally add EventBridge rules to auto start/stop on a schedule (work hours)
-- Consider moving certs/configs to AWS Secrets Manager and inject at runtime
-- Add a tiny PowerShell/Bash wrapper that starts the service, waits, updates Agent config file automatically, and launches the agent
+**Fargate (0.25 vCPU, 0.5 GB):** ~$0.012/hour
+- 2 hours/day, 20 days/month: ~$0.50/month
+- 8 hours/day, 20 days/month: ~$3/month
+- 24/7: ~$9/month
+
+**Additional:** CloudWatch Logs, ECR storage, data transfer (minimal)
+
+**With Lambda Control Plane:** $0.55-$3.05/month (automatic idle shutdown)
+
+---
+
+## Security Best Practices
+
+1. **Restrict Security Group:** Limit port 8443 to your IP (`/32` CIDR)
+2. **Keep mTLS enabled:** Certificate validation required
+3. **Protect private keys:** Never commit to repos
+4. **Use Secrets Manager:** Store certificates in AWS Secrets Manager for production
+5. **Set log retention:** 7-30 days in CloudWatch Logs
+6. **Keep ECR private:** Restrict repository access
+
+---
+
+## Troubleshooting
+
+**Task stuck in PENDING:**
+- Check subnets are public
+- Verify `assignPublicIp=ENABLED`
+- Confirm Fargate quota in region
+- Check security group configuration
+
+**Can't connect:**
+- Verify security group allows port 8443 from your IP
+- Confirm server is listening on 0.0.0.0:8443
+- Check CloudWatch Logs for startup errors
+
+**No logs in CloudWatch:**
+- Verify log group exists (`/fluidity/server`)
+- Check `awslogs` configuration in task definition
+- Confirm IAM execution role has CloudWatch permissions
+
+**TLS errors:**
+- Verify certificates match (CA, server cert, keys)
+- Confirm server is using correct cert files
+- Check certificate paths in task definition
+
+---
+
+## Next Steps
+
+- **Add Lambda control plane:** Automated lifecycle with cost optimization (see **[Lambda Functions](lambda.md)**)
+- **Use Secrets Manager:** Move certificates to AWS Secrets Manager
+- **Add alarms:** CloudWatch alarms for connection failures or high error rates
+- **Enable Container Insights:** Advanced ECS monitoring
+
+---
+
+## Related Documentation
+
+- **[Deployment Guide](deployment.md)** - All deployment options overview
+- **[Lambda Functions](lambda.md)** - Automated lifecycle management
+- **[Docker Guide](docker.md)** - Container build process
+- **[Architecture](architecture.md)** - System design details

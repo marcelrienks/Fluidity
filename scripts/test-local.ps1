@@ -47,11 +47,11 @@ try {
         Set-Location $projectRoot
         
         Write-Host "  Building server..." -ForegroundColor Cyan
-        go build -o build/fluidity-server.exe ./cmd/server
+        go build -o build/fluidity-server.exe ./cmd/core/server
         if ($LASTEXITCODE -ne 0) { throw "Server build failed" }
         
         Write-Host "  Building agent..." -ForegroundColor Cyan
-        go build -o build/fluidity-agent.exe ./cmd/agent
+        go build -o build/fluidity-agent.exe ./cmd/core/agent
         if ($LASTEXITCODE -ne 0) { throw "Agent build failed" }
         
         Write-Host "  [OK] Binaries built" -ForegroundColor Green

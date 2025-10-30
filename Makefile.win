@@ -8,11 +8,13 @@ GOMOD=$(GOCMD) mod
 
 AGENT_BINARY=fluidity-agent.exe
 SERVER_BINARY=fluidity-server.exe
+WAKE_LAMBDA_BINARY=bootstrap
 BUILD_DIR=build
-AGENT_DIR=cmd/agent
-SERVER_DIR=cmd/server
+AGENT_DIR=cmd/core/agent
+SERVER_DIR=cmd/core/server
+WAKE_LAMBDA_DIR=cmd/lambdas/wake
 
-.PHONY: all build clean test deps run-agent-local run-server-local docker-build-agent docker-build-server build-linux-agent build-linux-server
+.PHONY: all build clean test deps run-agent-local run-server-local docker-build-agent docker-build-server build-linux-agent build-linux-server build-lambda-wake package-lambda-wake
 
 all: clean deps build
 
@@ -37,6 +39,18 @@ build-linux-server:
 	@echo Building server for linux/amd64 (static)...
 	set GOOS=linux&& set GOARCH=amd64&& set CGO_ENABLED=0&& $(GOBUILD) -o $(BUILD_DIR)\fluidity-server ./$(SERVER_DIR)
 
+# Build Lambda functions for AWS (Linux AMD64)
+build-lambda-wake:
+	@echo Building Wake Lambda for AWS Lambda (linux/amd64)...
+	@if not exist $(BUILD_DIR)\lambda mkdir $(BUILD_DIR)\lambda
+	set GOOS=linux&& set GOARCH=amd64&& set CGO_ENABLED=0&& $(GOBUILD) -o $(BUILD_DIR)\lambda\$(WAKE_LAMBDA_BINARY) ./$(WAKE_LAMBDA_DIR)
+
+# Package Lambda for deployment
+package-lambda-wake: build-lambda-wake
+	@echo Creating Wake Lambda deployment package...
+	powershell -Command "Compress-Archive -Path $(BUILD_DIR)\lambda\$(WAKE_LAMBDA_BINARY) -DestinationPath $(BUILD_DIR)\lambda\wake-lambda.zip -Force"
+	@echo Wake Lambda package created: $(BUILD_DIR)\lambda\wake-lambda.zip
+
 clean:
 	@echo Cleaning...
 	@if exist $(BUILD_DIR) rmdir /s /q $(BUILD_DIR)
@@ -58,7 +72,8 @@ deps:
 
 test:
 	@echo Running tests...
-	$(GOTEST) -v ./...
+	$(GOTEST) -v ./internal/...
+	$(GOTEST) -v ./cmd/lambdas/...
 
 fmt:
 	@echo Formatting code...

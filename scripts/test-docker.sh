@@ -91,10 +91,10 @@ if [ "$SKIP_BUILD" = false ]; then
     export CGO_ENABLED=0
     
     echo -e "  ${CYAN}Building server...${NC}"
-    go build -o build/fluidity-server ./cmd/server || handle_error "Server build failed"
+    go build -o build/fluidity-server ./cmd/core/server || handle_error "Server build failed"
     
     echo -e "  ${CYAN}Building agent...${NC}"
-    go build -o build/fluidity-agent ./cmd/agent || handle_error "Agent build failed"
+    go build -o build/fluidity-agent ./cmd/core/agent || handle_error "Agent build failed"
     
     echo -e "  ${GREEN}[OK] Binaries built${NC}"
 else

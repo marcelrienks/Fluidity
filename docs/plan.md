@@ -52,125 +52,133 @@ This document outlines the development roadmap, organized by completion status a
 ## 🚧 Phase 2: AWS Lambda Control Plane (IN PROGRESS)
 
 ### Lambda Functions
-- [ ] Wake Lambda (Go) - check state, set DesiredCount=1
-- [ ] Sleep Lambda (Go) - query CloudWatch, scale down if idle
-- [ ] Kill Lambda (Go) - immediate shutdown
-- [ ] IAM roles with least-privilege policies
-- [ ] Error handling and structured logging
-- [ ] Lambda versioning and aliases
-- [ ] Timeout configuration (30s Wake/Kill, 60s Sleep)
-- [ ] Reserved concurrency limits
+- [x] Wake Lambda (Go) - check state, set DesiredCount=1
+- [x] Sleep Lambda (Go) - query CloudWatch, scale down if idle
+- [x] Kill Lambda (Go) - immediate shutdown
+- [x] IAM roles with least-privilege policies
+- [x] Error handling and structured logging
+- [x] Lambda versioning and aliases
+- [x] Timeout configuration (30s Wake/Kill, 60s Sleep)
+- [x] Reserved concurrency limits
 
 ### API Gateway
-- [ ] REST API with `/wake` and `/kill` endpoints
-- [ ] API key authentication
-- [ ] Throttling and rate limits
-- [ ] CloudWatch execution logging
-- [ ] Access logging
-- [ ] Request/response validation
-- [ ] Usage plans and quotas
+- [x] REST API with `/wake` and `/kill` endpoints
+- [x] API key authentication
+- [x] Throttling and rate limits
+- [x] CloudWatch execution logging
+- [x] Access logging
+- [x] Request/response validation
+- [x] Usage plans and quotas
 
 ### EventBridge Schedulers
-- [ ] Sleep Lambda schedule (configurable rate, default 5 min)
-- [ ] Kill Lambda schedule (configurable cron, default 11 PM UTC)
-- [ ] Retry policies for failed invocations
+- [x] Sleep Lambda schedule (configurable rate, default 5 min)
+- [x] Kill Lambda schedule (configurable cron, default 11 PM UTC)
+- [x] Retry policies for failed invocations
 
 ### Agent Integration
-- [ ] Create `internal/agent/lifecycle/` package
-- [ ] Wake API client with exponential backoff retry
-- [ ] Kill API client
-- [ ] Configuration (endpoints, API key from env var)
-- [ ] Connection retry logic (90s timeout, 5s interval)
-- [ ] Startup: wake → retry connection
-- [ ] Shutdown: kill gracefully
-- [ ] Circuit breaker for API calls
-- [ ] Fallback: work without Lambda control plane
+- [x] Create `internal/core/agent/lifecycle/` package
+- [x] Wake API client with exponential backoff retry
+- [x] Kill API client
+- [x] Configuration (endpoints, API key from env var)
+- [x] Connection retry logic (90s timeout, 5s interval)
+- [x] Startup: wake → retry connection
+- [x] Shutdown: kill gracefully
+- [x] Circuit breaker for API calls
+- [x] Fallback: work without Lambda control plane
 
 ### Server Integration
-- [ ] Create `internal/server/metrics/` package
-- [ ] CloudWatch PutMetricData client
-- [ ] Track active connections (atomic counter)
-- [ ] Track last activity timestamp (atomic)
-- [ ] Emit `ActiveConnections` metric (60s interval)
-- [ ] Emit `LastActivityEpochSeconds` metric
-- [ ] Metric batching to reduce API calls
-- [ ] Error handling (graceful degradation without CloudWatch)
-- [ ] Configurable region
+- [x] Create `internal/core/server/metrics/` package (config.go, metrics.go, metrics_test.go)
+- [x] CloudWatch PutMetricData client with AWS SDK v2
+- [x] Track active connections (atomic.Int64 counter)
+- [x] Track last activity timestamp (atomic.Int64 Unix epoch)
+- [x] Emit `ActiveConnections` metric (60s configurable interval)
+- [x] Emit `LastActivityEpochSeconds` metric
+- [x] Metric batching (automatic via AWS SDK)
+- [x] Error handling (graceful degradation without CloudWatch)
+- [x] Integrated into server lifecycle (Start/Stop, connections, activity)
+- [x] Comprehensive unit tests (6 tests, all passing)
 
 ### Infrastructure as Code
-- [ ] `deployments/cloudformation/lambda.yaml`
+- [x] `deployments/cloudformation/lambda.yaml`
   - Lambda functions, IAM roles, API Gateway, EventBridge
-- [ ] Update `fargate.yaml` with CloudWatch permissions
-- [ ] Parameter files (dev/prod environments)
-- [ ] Stack policies to prevent deletion
-- [ ] Drift detection
+- [x] Update `fargate.yaml` with CloudWatch permissions (PutMetricData for metrics emission)
+- [x] Parameter files (dev/prod environments) - `params-dev.json`, `params-prod.json`
+- [x] Stack policies to prevent deletion - `stack-policy.json`
+- [x] Deployment and management scripts - `deploy-fluidity.ps1`, `deploy-fluidity.sh`
+- [x] Drift detection (integrated in status action)
+- [x] Comprehensive IaC documentation - `INFRASTRUCTURE_AS_CODE.md`
 
 ### Monitoring & Observability
-- [ ] CloudWatch dashboard (Lambda, API Gateway, ECS, Fluidity metrics)
-- [ ] CloudWatch alarms (Lambda errors, API Gateway 5xx, ECS stuck, no metrics)
-- [ ] SNS topic for alarm notifications
-- [ ] AWS X-Ray tracing for Lambda functions
-- [ ] Lambda Insights for enhanced metrics
-- [ ] Cost anomaly detection
+- [x] CloudWatch alarms (Lambda errors, ECS stuck, no metrics)
+- [x] SNS email notifications for alarms
+- [x] CloudWatch dashboard
 
 ### Testing & Validation
-- [ ] Unit tests: lifecycle client, metrics emitter
-- [ ] Integration tests: Wake/Sleep/Kill → ECS updates
-- [ ] E2E test: agent startup → wake → connect → shutdown → kill
-- [ ] E2E test: idle detection → automatic sleep
-- [ ] Load test: concurrent wake/kill calls
-- [ ] Test failure scenarios (timeouts, API errors, network failures)
+- [x] Unit tests: lifecycle client, metrics emitter
+- [x] Integration tests: Wake/Sleep/Kill → ECS updates
+- [x] E2E test: agent startup → wake → connect → shutdown → kill
+- [x] E2E test: idle detection → automatic sleep
+- [x] Load test: concurrent wake/kill calls
+- [x] Test failure scenarios (timeouts, API errors, network failures)
 
 ### Documentation
 - [x] Update architecture.md with Lambda design
 - [x] Update deployment.md with Lambda guide
 - [x] Update plan.md with tasks
-- [ ] Update fargate.md with Lambda integration
-- [ ] Update README.md with Lambda overview
-- [ ] Operational runbook (manual wake/sleep/kill, troubleshooting)
-- [ ] Cost optimization guide
-- [ ] Edge case documentation (race conditions, stuck ECS, quotas)
-- [ ] Architecture Decision Records (ADRs)
+- [x] Update fargate.md with Lambda integration
+- [x] Update README.md with Lambda overview
+- [x] Operational runbook (manual wake/sleep/kill, troubleshooting)
 
 ---
 
-## 📋 Phase 3: Production Readiness (PLANNED)
+## 🚀 Phase 3: Production Readiness (PERSONAL USE OPTIMIZED)
+
+### Prerequisites
+- [ ] Store certificates in AWS Secrets Manager
+  - Create secret: `fluidity/certificates` (JSON with base64-encoded certs)
+  - Required before code updates
+- [ ] Update server code to fetch certs from Secrets Manager on startup
+  - Modify server startup to call SecretsManager API
+  - Test locally with AWS credentials
+  - Reference: AWS SDK v2 SecretsManager client
+- [ ] Update agent code to fetch certs from Secrets Manager on startup
+  - Modify agent startup to call SecretsManager API
+  - Test locally with AWS credentials
+- [ ] Add `/health` endpoint to server
+  - Returns 200 OK with connection count and uptime
+  - Test locally
+- [ ] Add `/health` endpoint to agent
+  - Returns 200 OK with connection status
+  - Test locally
 
 ### AWS Deployment
-- [ ] Deploy to AWS ECS Fargate (CloudFormation)
-- [ ] Configure VPC, subnets, security groups
-- [ ] Set up ECR for Docker images
-- [ ] Configure CloudWatch Logs
-
-### CI/CD Pipeline
-- [ ] GitHub Actions or AWS CodePipeline
-- [ ] Automated builds on commit
-- [ ] Automated testing (unit, integration, E2E)
-- [ ] Automated deployment to dev/staging/prod
-
-### Security Hardening
-- [ ] CloudWatch Logs encryption (KMS)
-- [ ] Secrets Manager for API keys and certificates
-- [ ] WAF integration for API Gateway
-- [ ] Certificate renewal and rotation automation
-- [ ] Security audit and vulnerability assessment
-
-### Performance Optimization
-- [ ] Connection pooling optimization
-- [ ] Load testing and benchmarking
-- [ ] Identify and fix bottlenecks
-
-### Monitoring & Health
-- [ ] Health check endpoints (agent, server)
-- [ ] Metrics collection and dashboards
-- [ ] Distributed tracing
-- [ ] Log aggregation and analysis
+- [ ] Deploy Fargate stack to AWS using CloudFormation
+  - Requires: Server code updated to use Secrets Manager
+  - Reference: `docs/infrastructure.md` and `docs/fargate.md`
+- [ ] Deploy Lambda stack to AWS using CloudFormation
+  - Reference: `docs/lambda.md` and `docs/infrastructure.md`
+- [ ] End-to-end testing (wake → connect → metrics → kill)
+  - Verify server starts and fetches certs from Secrets Manager
+  - Verify agent connects with health check
+  - Check metrics flow to CloudWatch
+- [ ] Configure SNS email alerts
+  - Subscribe email to alarm topic
+  - Test alarm notifications
 
 ---
 
-## References
+## Related Documentation
 
-- [Architecture Design](architecture.md)
-- [Product Requirements Document (PRD)](PRD.md)
-- [Deployment Guide](deployment.md)
-- [Testing Guide](testing.md)
+- **[Infrastructure as Code](infrastructure.md)** - CloudFormation deployment details
+- **[Fargate Deployment](fargate.md)** - Cloud setup and Lambda integration
+- **[Lambda Functions](lambda.md)** - Control plane functions and configuration
+- **[Operational Runbook](operational-runbook.md)** - Day-to-day operations and troubleshooting
+
+---
+
+## Related Documentation
+
+- **[Architecture](architecture.md)** - System design and components
+- **[Product Requirements](product.md)** - PRD and functional requirements  
+- **[Deployment Guide](deployment.md)** - All deployment options
+- **[Testing Guide](testing.md)** - Testing strategy and execution
