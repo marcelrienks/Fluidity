@@ -13,15 +13,6 @@ Fluidity tunnels HTTP/HTTPS/WebSocket traffic through restrictive firewalls usin
 **Size**: ~44MB Alpine containers  
 **Security**: mTLS with private CA
 
-## Features
-
-✅ HTTP/HTTPS/WebSocket tunneling  
-✅ mTLS authentication  
-✅ Auto-reconnection  
-✅ Cross-platform (Windows/macOS/Linux)  
-✅ 75+ tests, ~77% coverage  
-🚧 Lambda-based lifecycle automation
-
 ## Quick Start
 
 ```bash
@@ -40,7 +31,7 @@ curl -x http://127.0.0.1:8080 http://example.com
 ```
 
 ## Architecture
-
+**→ Full details:** [Architecture Documentation](docs/architecture.md)
 Fluidity uses a **client-server architecture** with mTLS authentication for secure tunneling through restrictive firewalls.
 
 **Key Components:**
@@ -49,12 +40,22 @@ Fluidity uses a **client-server architecture** with mTLS authentication for secu
 - **Protocol**: Custom WebSocket-based with request/response IDs, connection pooling, auto-reconnection
 - **Security**: Mutual TLS with private CA certificates, no plaintext credentials
 
-**→ Full details:** [Architecture Documentation](docs/architecture.md)
-
 ## Deployment
+**→ Full deployment details:** [Deployment Guide](docs/deployment.md)
+
+Fluidity supports multiple deployment options for different use cases:
+
+- **Development**: Local and Docker environments for testing and debugging
+- **Production**: AWS Fargate for the server, local agent, with optional Lambda control plane for cost optimization
+- **Infrastructure as Code**: CloudFormation templates for automated, repeatable deployments
+
+**Recommended Production Setup:**
+1. Deploy Fargate server via CloudFormation (`./scripts/deploy-fluidity.sh fargate deploy`)
+2. Deploy Lambda control plane for on-demand operation (`./scripts/deploy-fluidity.sh lambda deploy`)
+3. Run agent locally with generated certificates
+4. Total cost: ~$0.11-0.21/month with on-demand lifecycle management
 
 ### Development
-
 Local development and testing options for building and contributing to Fluidity.
 
 #### **🏠 Local**
@@ -78,6 +79,7 @@ make -f Makefile.<platform> test
 **Cost:** Free
 
 #### **🐳 Docker**
+**→ Full details:** [Development Guide](docs/development.md) | [Docker Guide](docs/docker.md)
 Build and run containerized images locally with Docker Desktop.
 
 **Commands:**
@@ -102,8 +104,6 @@ make -f Makefile.<platform> run-agent
 - `internal/lambdas/` - Control plane functions (wake, sleep, kill)
 
 **Testing:** 75+ tests with ~77% coverage (unit, integration, E2E)
-
-**→ Full details:** [Development Guide](docs/development.md) | [Docker Guide](docs/docker.md)
 
 ### Production (Recommended: CloudFormation)
 Deploy to AWS using **Infrastructure as Code** for automated, repeatable, cost-effective infrastructure.
@@ -141,7 +141,7 @@ make -f Makefile.<platform> run-agent-local
 - Auto-reconnection with exponential backoff
 
 #### **☁️ Server (Fargate)**
-
+**→ Details:** [Infrastructure Documentation](docs/infrastructure.md) | [AWS Fargate Guide](docs/fargate.md)
 Serverless container platform running the Fluidity server without managing EC2 instances.
 
 **What's deployed:**
@@ -178,10 +178,8 @@ aws ecs describe-tasks --cluster fluidity --tasks <task-arn> | grep "publicIp"
 
 **Cost:** $0.50-3/month (24/7) or $0.10-0.20/month (on-demand with Lambda)
 
-**→ Details:** [Infrastructure Documentation](docs/infrastructure.md) | [AWS Fargate Guide](docs/fargate.md)
-
 #### **⚡ Control Plane (Lambda + API Gateway)**
-
+**→ Details:** [Infrastructure Documentation](docs/infrastructure.md) | [Lambda Functions Guide](docs/lambda.md)
 Automated lifecycle management to minimize costs with on-demand server operation.
 
 **Components:**
@@ -217,10 +215,8 @@ curl -X POST https://<api-id>.execute-api.us-east-1.amazonaws.com/prod/kill
 - Lambda: ~$0.01/month (1000 invocations)
 - **Total: ~$0.11-0.21/month** (90% savings for occasional use)
 
-**→ Details:** [Infrastructure Documentation](docs/infrastructure.md) | [Lambda Functions Guide](docs/lambda.md)
-
 #### **🔐 Certificates**
-
+**→ Full details:** [Certificate Guide](docs/certificate.md)
 mTLS certificates for secure authentication between agent and server.
 
 **Generate Certificates:**
@@ -250,12 +246,8 @@ mTLS certificates for secure authentication between agent and server.
 
 **Security:** Private CA, 2048-bit RSA, SHA-256
 
-**→ Full details:** [Certificate Guide](docs/certificate.md)
-
-**→ Full deployment details:** [Deployment Guide](docs/deployment.md)
-
 ## Operations
-
+**→ Full details:** [Operational Runbook](docs/runbook.md)
 Daily operations, monitoring, troubleshooting, and maintenance procedures for production environments.
 
 **Key Tasks:**
@@ -273,10 +265,8 @@ aws ecs describe-services --cluster fluidity --services server
 aws logs tail /ecs/fluidity-server --follow
 ```
 
-**→ Full details:** [Operational Runbook](docs/runbook.md)
-
 ## Testing
-
+**→ Full details:** [Testing Guide](docs/testing.md)
 Three-tier testing strategy ensuring code quality and reliability.
 
 **Test Tiers:**
@@ -298,10 +288,8 @@ make -f Makefile.<platform> coverage
 go test -v ./internal/core/agent/...
 ```
 
-**→ Full details:** [Testing Guide](docs/testing.md)
-
 ## Product Requirements
-
+**→ Full details:** [Product Requirements](docs/product.md)
 Feature specifications, user stories, and success metrics for Fluidity.
 
 **Core Features (Phase 1 ✅):**
@@ -319,10 +307,8 @@ Feature specifications, user stories, and success metrics for Fluidity.
 - Enhanced monitoring
 - Rate limiting and DDoS protection
 
-**→ Full details:** [Product Requirements](docs/product.md)
-
 ## Development Roadmap
-
+**→ Full details:** [Development Plan](docs/plan.md)
 Project status and implementation roadmap by phase.
 
 **Phase 1 (Complete ✅):**
@@ -340,8 +326,6 @@ Project status and implementation roadmap by phase.
 - CI/CD with GitHub Actions
 - Enhanced security (rate limiting, DDoS)
 - Production monitoring improvements
-
-**→ Full details:** [Development Plan](docs/plan.md)
 
 ## Disclaimer
 
