@@ -41,6 +41,7 @@ type Server struct {
 	tcpMutex       sync.RWMutex
 	wsConns        map[string]*websocket.Conn
 	wsMutex        sync.RWMutex
+	startTime      time.Time
 }
 
 // NewServer creates a new tunnel server
@@ -102,6 +103,7 @@ func NewServer(tlsConfig *tls.Config, addr string, maxConns int, logLevel string
 		maxConns:       maxConns,
 		tcpConns:       make(map[string]net.Conn),
 		wsConns:        make(map[string]*websocket.Conn),
+		startTime:      time.Now(),
 	}, nil
 }
 
@@ -176,6 +178,36 @@ func (s *Server) Stop() error {
 	}
 
 	return nil
+}
+
+// HealthStatus represents the health check response
+type HealthStatus struct {
+	Status             string  `json:"status"`
+	ActiveConnections  int32   `json:"active_connections"`
+	UptimeSeconds      int64   `json:"uptime_seconds"`
+	MaxConnections     int     `json:"max_connections"`
+	ConnectionsPercent float64 `json:"connections_percent"`
+}
+
+// GetHealth returns the health status of the server
+func (s *Server) GetHealth() HealthStatus {
+	s.connMutex.RLock()
+	activeConns := s.activeConns
+	s.connMutex.RUnlock()
+
+	uptime := int64(time.Since(s.startTime).Seconds())
+	connPercent := 0.0
+	if s.maxConns > 0 {
+		connPercent = (float64(activeConns) / float64(s.maxConns)) * 100
+	}
+
+	return HealthStatus{
+		Status:             "healthy",
+		ActiveConnections:  activeConns,
+		UptimeSeconds:      uptime,
+		MaxConnections:     s.maxConns,
+		ConnectionsPercent: connPercent,
+	}
 }
 
 // handleConnection processes requests from a single agent

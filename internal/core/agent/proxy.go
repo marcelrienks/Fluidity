@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -25,6 +26,7 @@ type Server struct {
 	listener   net.Listener
 	ctx        context.Context
 	cancel     context.CancelFunc
+	startTime  time.Time
 }
 
 // NewServer creates a new HTTP proxy server
@@ -40,6 +42,7 @@ func NewServer(port int, tunnelConn *Client, logLevel string) *Server {
 		logger:     logger,
 		ctx:        ctx,
 		cancel:     cancel,
+		startTime:  time.Now(),
 	}
 
 	proxy.server = &http.Server{
@@ -87,8 +90,42 @@ func (p *Server) Stop() error {
 	return p.server.Shutdown(ctx)
 }
 
+// HealthStatus represents the health check response
+type ProxyHealthStatus struct {
+	Status        string `json:"status"`
+	Connected     bool   `json:"connected"`
+	UptimeSeconds int64  `json:"uptime_seconds"`
+	ProxyPort     int    `json:"proxy_port"`
+	ServerAddr    string `json:"server_addr"`
+}
+
+// handleHealthCheck processes health check requests
+func (p *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
+	uptime := int64(time.Since(p.startTime).Seconds())
+
+	health := ProxyHealthStatus{
+		Status:        "healthy",
+		Connected:     p.tunnelConn.IsConnected(),
+		UptimeSeconds: uptime,
+		ProxyPort:     p.port,
+		ServerAddr:    p.tunnelConn.serverAddr,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(health); err != nil {
+		p.logger.Error("Failed to encode health check response", err)
+	}
+}
+
 // handleRequest processes incoming HTTP requests
 func (p *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
+	// Handle health check endpoint
+	if r.URL.Path == "/health" && r.Method == "GET" {
+		p.handleHealthCheck(w, r)
+		return
+	}
+
 	// Log the request (domain only for privacy)
 	p.logRequest(r)
 

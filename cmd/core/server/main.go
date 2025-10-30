@@ -2,17 +2,22 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"fluidity/internal/core/server"
 	"fluidity/internal/shared/config"
 	"fluidity/internal/shared/logging"
-	"fluidity/internal/shared/tls"
+	"fluidity/internal/shared/secretsmanager"
+	tlsutil "fluidity/internal/shared/tls"
 )
 
 var (
@@ -94,10 +99,36 @@ func runServer(cmd *cobra.Command, args []string) error {
 		"max_connections", cfg.MaxConnections,
 		"log_level", cfg.LogLevel)
 
-	// Load TLS configuration
-	tlsConfig, err := tls.LoadServerTLSConfig(cfg.CertFile, cfg.KeyFile, cfg.CACertFile)
-	if err != nil {
-		return fmt.Errorf("failed to load TLS configuration: %w", err)
+	// Load TLS configuration (with Secrets Manager support if enabled)
+	var tlsConfig *tls.Config
+
+	if cfg.UseSecretsManager && cfg.SecretsManagerName != "" {
+		logger.Info("Using AWS Secrets Manager for TLS certificates",
+			"secret_name", cfg.SecretsManagerName)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		var tlsErr error
+		tlsConfig, tlsErr = secretsmanager.LoadTLSConfigFromSecretsOrFallback(
+			ctx,
+			cfg.SecretsManagerName,
+			cfg.CertFile,
+			cfg.KeyFile,
+			cfg.CACertFile,
+			true, // isServer
+			func() (*tls.Config, error) {
+				return tlsutil.LoadServerTLSConfig(cfg.CertFile, cfg.KeyFile, cfg.CACertFile)
+			},
+		)
+		if tlsErr != nil {
+			return fmt.Errorf("failed to load TLS configuration: %w", tlsErr)
+		}
+	} else {
+		logger.Info("Using local files for TLS certificates")
+		var tlsErr error
+		tlsConfig, tlsErr = tlsutil.LoadServerTLSConfig(cfg.CertFile, cfg.KeyFile, cfg.CACertFile)
+		if tlsErr != nil {
+			return fmt.Errorf("failed to load TLS configuration: %w", tlsErr)
+		}
 	}
 
 	logger.Info("Loaded TLS configuration",
@@ -119,6 +150,33 @@ func runServer(cmd *cobra.Command, args []string) error {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
+	// Start health check HTTP server (port 8080)
+	healthMux := http.NewServeMux()
+	healthMux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(tunnelServer.GetHealth()); err != nil {
+			logger.Error("Failed to encode health response", err)
+		}
+	})
+
+	healthServer := &http.Server{
+		Addr:         ":8080",
+		Handler:      healthMux,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 5 * time.Second,
+		IdleTimeout:  10 * time.Second,
+	}
+
+	healthErrChan := make(chan error, 1)
+	go func() {
+		if err := healthServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			healthErrChan <- err
+		}
+	}()
+
+	logger.Info("Health check server started on", "addr", "localhost:8080")
+
 	// Start server in a goroutine
 	serverErrChan := make(chan error, 1)
 	go func() {
@@ -135,11 +193,23 @@ func runServer(cmd *cobra.Command, args []string) error {
 		logger.Info("Shutdown signal received, stopping server...")
 	case err := <-serverErrChan:
 		logger.Error("Server error", err)
+		healthServer.Shutdown(context.Background())
+		return err
+	case err := <-healthErrChan:
+		logger.Error("Health server error", err)
+		tunnelServer.Stop()
 		return err
 	}
 
 	// Graceful shutdown
 	cancel()
+
+	// Stop health server
+	healthShutdownCtx, healthShutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := healthServer.Shutdown(healthShutdownCtx); err != nil {
+		logger.Warn("Error shutting down health server", err)
+	}
+	healthShutdownCancel()
 
 	// Stop server
 	if err := tunnelServer.Stop(); err != nil {

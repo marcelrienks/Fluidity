@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"os"
 	"os/signal"
@@ -14,7 +15,8 @@ import (
 	"fluidity/internal/core/agent/lifecycle"
 	"fluidity/internal/shared/config"
 	"fluidity/internal/shared/logging"
-	"fluidity/internal/shared/tls"
+	"fluidity/internal/shared/secretsmanager"
+	tlsutil "fluidity/internal/shared/tls"
 )
 
 var (
@@ -110,10 +112,36 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Load TLS configuration
-	tlsConfig, err := tls.LoadClientTLSConfig(cfg.CertFile, cfg.KeyFile, cfg.CACertFile)
-	if err != nil {
-		return fmt.Errorf("failed to load TLS configuration: %w", err)
+	// Load TLS configuration (with Secrets Manager support if enabled)
+	var tlsConfig *tls.Config
+
+	if cfg.UseSecretsManager && cfg.SecretsManagerName != "" {
+		logger.Info("Using AWS Secrets Manager for TLS certificates",
+			"secret_name", cfg.SecretsManagerName)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		var tlsErr error
+		tlsConfig, tlsErr = secretsmanager.LoadTLSConfigFromSecretsOrFallback(
+			ctx,
+			cfg.SecretsManagerName,
+			cfg.CertFile,
+			cfg.KeyFile,
+			cfg.CACertFile,
+			false, // isServer
+			func() (*tls.Config, error) {
+				return tlsutil.LoadClientTLSConfig(cfg.CertFile, cfg.KeyFile, cfg.CACertFile)
+			},
+		)
+		if tlsErr != nil {
+			return fmt.Errorf("failed to load TLS configuration: %w", tlsErr)
+		}
+	} else {
+		logger.Info("Using local files for TLS certificates")
+		var tlsErr error
+		tlsConfig, tlsErr = tlsutil.LoadClientTLSConfig(cfg.CertFile, cfg.KeyFile, cfg.CACertFile)
+		if tlsErr != nil {
+			return fmt.Errorf("failed to load TLS configuration: %w", tlsErr)
+		}
 	}
 
 	logger.Info("Loaded TLS configuration",
