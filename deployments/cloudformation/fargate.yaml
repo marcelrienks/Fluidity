@@ -157,7 +157,19 @@ Resources:
               Service: ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
       Path: '/'
-      # Add policies here if task needs AWS API access (S3, Secrets Manager, etc.)
+      Policies:
+        - PolicyName: CloudWatchMetrics
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: PutMetricData
+                Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    cloudwatch:namespace: Fluidity
 
   SecurityGroup:
     Type: AWS::EC2::SecurityGroup

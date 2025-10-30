@@ -49,6 +49,7 @@ curl -x http://127.0.0.1:8080 http://example.com
 - **[Testing](docs/testing.md)** - Unit, integration, and E2E tests
 
 ### Deployment-Specific
+- **[Infrastructure as Code](docs/infrastructure.md)** - CloudFormation templates and automated deployment
 - **[Docker](docs/docker.md)** - Container builds and networking
 - **[AWS Fargate](docs/fargate.md)** - Cloud deployment guide
 - **[Lambda Functions](docs/lambda.md)** - Automated lifecycle management

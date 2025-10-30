@@ -1,0 +1,102 @@
+[
+  {
+    "ParameterKey": "ClusterName",
+    "ParameterValue": "fluidity"
+  },
+  {
+    "ParameterKey": "ServiceName",
+    "ParameterValue": "fluidity-server"
+  },
+  {
+    "ParameterKey": "ContainerImage",
+    "ParameterValue": "YOUR_ACCOUNT_ID.dkr.ecr.YOUR_REGION.amazonaws.com/fluidity-server:latest"
+  },
+  {
+    "ParameterKey": "ContainerPort",
+    "ParameterValue": "8443"
+  },
+  {
+    "ParameterKey": "Cpu",
+    "ParameterValue": "256"
+  },
+  {
+    "ParameterKey": "Memory",
+    "ParameterValue": "512"
+  },
+  {
+    "ParameterKey": "DesiredCount",
+    "ParameterValue": "0"
+  },
+  {
+    "ParameterKey": "VpcId",
+    "ParameterValue": "YOUR_VPC_ID"
+  },
+  {
+    "ParameterKey": "PublicSubnets",
+    "ParameterValue": "YOUR_SUBNET_ID_1,YOUR_SUBNET_ID_2"
+  },
+  {
+    "ParameterKey": "AllowedIngressCidr",
+    "ParameterValue": "YOUR_IP/32"
+  },
+  {
+    "ParameterKey": "AssignPublicIp",
+    "ParameterValue": "ENABLED"
+  },
+  {
+    "ParameterKey": "LogGroupName",
+    "ParameterValue": "/ecs/fluidity/server"
+  },
+  {
+    "ParameterKey": "LogRetentionDays",
+    "ParameterValue": "30"
+  },
+  {
+    "ParameterKey": "ECSClusterName",
+    "ParameterValue": "fluidity"
+  },
+  {
+    "ParameterKey": "ECSServiceName",
+    "ParameterValue": "fluidity-server"
+  },
+  {
+    "ParameterKey": "IdleThresholdMinutes",
+    "ParameterValue": "15"
+  },
+  {
+    "ParameterKey": "LookbackPeriodMinutes",
+    "ParameterValue": "10"
+  },
+  {
+    "ParameterKey": "SleepCheckIntervalMinutes",
+    "ParameterValue": "5"
+  },
+  {
+    "ParameterKey": "DailyKillTime",
+    "ParameterValue": "cron(0 23 * * ? *)"
+  },
+  {
+    "ParameterKey": "WakeLambdaTimeout",
+    "ParameterValue": "30"
+  },
+  {
+    "ParameterKey": "SleepLambdaTimeout",
+    "ParameterValue": "60"
+  },
+  {
+    "ParameterKey": "KillLambdaTimeout",
+    "ParameterValue": "30"
+  },
+  {
+    "ParameterKey": "APIThrottleBurstLimit",
+    "ParameterValue": "20"
+  },
+  {
+    "ParameterKey": "APIThrottleRateLimit",
+    "ParameterValue": "3"
+  },
+  {
+    "ParameterKey": "APIQuotaLimit",
+    "ParameterValue": "300"
+  }
+]

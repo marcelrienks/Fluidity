@@ -101,10 +101,12 @@ This document outlines the development roadmap, organized by completion status a
 ### Infrastructure as Code
 - [x] `deployments/cloudformation/lambda.yaml`
   - Lambda functions, IAM roles, API Gateway, EventBridge
-- [ ] Update `fargate.yaml` with CloudWatch permissions
-- [ ] Parameter files (dev/prod environments)
-- [ ] Stack policies to prevent deletion
-- [ ] Drift detection
+- [x] Update `fargate.yaml` with CloudWatch permissions (PutMetricData for metrics emission)
+- [x] Parameter files (dev/prod environments) - `params-dev.json`, `params-prod.json`
+- [x] Stack policies to prevent deletion - `stack-policy.json`
+- [x] Deployment and management scripts - `deploy-fluidity.ps1`, `deploy-fluidity.sh`
+- [x] Drift detection (integrated in status action)
+- [x] Comprehensive IaC documentation - `INFRASTRUCTURE_AS_CODE.md`
 
 ### Monitoring & Observability
 - [ ] CloudWatch dashboard (Lambda, API Gateway, ECS, Fluidity metrics)
