@@ -16,17 +16,21 @@ Fluidity tunnels HTTP/HTTPS/WebSocket traffic through restrictive firewalls usin
 ## Quick Start
 
 ```bash
-# 1. Generate certificates
-./scripts/manage-certs.sh  # macOS/Linux
-.\scripts\manage-certs.ps1  # Windows
+# 1. Generate certificates locally
+./scripts/manage-certs.sh
 
-# 2. Run server and agent
-make -f Makefile.<platform> run-server-local  # Terminal 1
-make -f Makefile.<platform> run-agent-local   # Terminal 2
+# 2. Push Docker image to ECR
+make -f Makefile.<platform> push-server
 
-# 3. Set browser proxy to localhost:8080
+# 3. Deploy to AWS (certificates passed as parameters)
+./scripts/deploy-fluidity.sh fargate deploy
 
-# 4. Test
+# 4. Run agent locally (uses certificates from ./certs/)
+make -f Makefile.<platform> run-agent-local
+
+# 5. Set browser proxy to localhost:8080
+
+# 6. Test
 curl -x http://127.0.0.1:8080 http://example.com
 ```
 
@@ -50,10 +54,12 @@ Fluidity supports multiple deployment options for different use cases:
 - **Infrastructure as Code**: CloudFormation templates for automated, repeatable deployments
 
 **Recommended Production Setup:**
-1. Deploy Fargate server via CloudFormation (`./scripts/deploy-fluidity.sh fargate deploy`)
-2. Deploy Lambda control plane for on-demand operation (`./scripts/deploy-fluidity.sh lambda deploy`)
-3. Run agent locally with generated certificates
-4. Total cost: ~$0.11-0.21/month with on-demand lifecycle management
+1. Generate certificates locally (`./scripts/manage-certs.sh`)
+2. Push Docker image to ECR (`make -f Makefile.<platform> push-server`)
+3. Deploy Fargate server via CloudFormation - certificates passed as parameters (`./scripts/deploy-fluidity.sh fargate deploy`)
+4. Deploy Lambda control plane for on-demand operation (`./scripts/deploy-fluidity.sh lambda deploy`)
+5. Run agent locally with certificates from ./certs/
+6. Total cost: ~$0.11-0.21/month with on-demand lifecycle management
 
 ### Development
 Local development and testing options for building and contributing to Fluidity.
@@ -63,15 +69,11 @@ Run both server and agent on your local machine.
 
 **Quick Setup:**
 ```bash
-# 1. Generate certificates
-./scripts/manage-certs.sh  # macOS/Linux
-.\scripts\manage-certs.ps1  # Windows
-
-# 2. Run locally
+# 1. Run locally
 make -f Makefile.<platform> run-server-local  # Terminal 1
 make -f Makefile.<platform> run-agent-local   # Terminal 2
 
-# 3. Test
+# 2. Test
 make -f Makefile.<platform> test
 ```
 
@@ -153,14 +155,21 @@ Serverless container platform running the Fluidity server without managing EC2 i
 
 **CloudFormation:**
 ```bash
-# Deploy via script
+# Generate certificates first
+./scripts/manage-certs.sh
+
+# Deploy via script (certificates passed from ./certs/ directory)
 ./scripts/deploy-fluidity.sh fargate deploy
 
-# Or use template directly
+# Or use template directly (must pass certificate parameters)
 aws cloudformation create-stack \
   --stack-name fluidity-fargate \
   --template-body file://deployments/cloudformation/fargate.yaml \
-  --parameters file://deployments/cloudformation/params.json
+  --parameters file://deployments/cloudformation/params.json \
+    ParameterKey=CertPem,ParameterValue=$(base64 -i ./certs/server.crt | tr -d '\n') \
+    ParameterKey=KeyPem,ParameterValue=$(base64 -i ./certs/server.key | tr -d '\n') \
+    ParameterKey=CaPem,ParameterValue=$(base64 -i ./certs/ca.crt | tr -d '\n') \
+  --capabilities CAPABILITY_NAMED_IAM
 ```
 
 **Manual Deployment:**
@@ -219,32 +228,39 @@ curl -X POST https://<api-id>.execute-api.us-east-1.amazonaws.com/prod/kill
 **→ Full details:** [Certificate Guide](docs/certificate.md)
 mTLS certificates for secure authentication between agent and server.
 
-**Generate Certificates:**
+**Generate Certificates (Required for both Dev and Prod):**
 ```bash
-./scripts/manage-certs.sh              # Local files only
-./scripts/manage-certs.sh --upload     # Upload to AWS Secrets Manager
+./scripts/manage-certs.sh  # Generates certificates in ./certs/ directory
 ```
 
 **For Production (AWS):**
-1. Generate certificates with `--upload` flag
-2. CloudFormation automatically configures Fargate to use Secrets Manager
-3. Agent uses local certificate files
+- Certificates are generated locally using the script above
+- CloudFormation deployment reads certificates from ./certs/ and creates Secrets Manager secret
+- Secrets Manager secret is part of the CloudFormation stack (managed lifecycle)
+- Server pulls certificates from Secrets Manager at runtime
+- Agent uses certificates from local ./certs/ directory
 
-**Local Files (./certs/):**
-- `ca.crt`, `ca.key` - CA certificate and key
-- `server.crt`, `server.key` - Server certificate
-- `client.crt`, `client.key` - Client certificate
+**For Local Development:**
+- Same script generates certificates in ./certs/
+- Both server and agent read directly from ./certs/
 
-**AWS Secrets Manager:**
-- Secret name: `fluidity/certificates`
-- Contains Base64-encoded `cert_pem`, `key_pem`, `ca_pem`
+**Certificate Storage:**
+- **Local Files** (./certs/): Primary source, used by deployment script
+  - `ca.crt`, `ca.key` - CA certificate and key
+  - `server.crt`, `server.key` - Server certificate (sent to AWS)
+  - `client.crt`, `client.key` - Client certificate (used by agent)
+- **AWS Secrets Manager**: `fluidity/certificates` (created by CloudFormation)
+  - Contains Base64-encoded `cert_pem`, `key_pem`, `ca_pem`
+  - Populated from local files during deployment
+  - Deleted when stack is deleted
 
 **Certificate Rotation:**
-1. Generate new certificates with `--upload`
-2. Restart Fargate server (task pulls latest from Secrets Manager)
-3. Restart local agent with new client certificates
+1. Generate new certificates: `./scripts/manage-certs.sh`
+2. Redeploy CloudFormation stack (updates Secrets Manager)
+3. Restart Fargate server (pulls new certificates from Secrets Manager)
+4. Restart local agent (uses new certificates from ./certs/)
 
-**Security:** Private CA, 2048-bit RSA, SHA-256
+**Security:** Private CA, 4096-bit RSA, SHA-256, 2-year validity
 
 ## Operations
 **→ Full details:** [Operational Runbook](docs/runbook.md)

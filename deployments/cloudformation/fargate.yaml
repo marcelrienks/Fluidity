@@ -2,15 +2,17 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: |
   Fluidity - AWS Fargate (ECS) deployment for tunnel server
   
-  This CloudFormation template deploys the Fluidity tunnel server as a Fargate task.
+  This CloudFormation template deploys the Fluidity tunnel server as a Fargate task with
+  mTLS certificate management via AWS Secrets Manager.
   
   IMPORTANT NOTES:
   
-  1. CERTIFICATES: The Docker image must include TLS certificates at /root/certs/
-     - Option A: Bake certificates into a custom image (rebuild with certs in build context)
-     - Option B: Use AWS Secrets Manager and update TaskDefinition to mount secrets
-     - Option C: Use EFS volume and store certificates there
-     The default Dockerfile expects certificates to be included when building the image.
+  1. CERTIFICATES (PREREQUISITE):
+     - Run ./scripts/manage-certs.sh BEFORE deploying (generates certs locally)
+     - Pass certificate content as CloudFormation parameters during deployment
+     - CloudFormation creates Secrets Manager secret as part of the stack
+     - Certificates mounted as ECS secrets into the container at runtime
+     - Secret is deleted when stack is deleted (managed lifecycle)
   
   2. NETWORKING: 
      - Container binds to 0.0.0.0:8443 (accepts connections on all interfaces)
@@ -24,17 +26,18 @@ Description: |
      - Estimated cost: ~$9/month for 24/7, ~$0.50/month for 2hrs/day
   
   4. DEPLOYMENT:
+     - Generate certificates: ./scripts/manage-certs.sh
      - Push your Docker image to Amazon ECR first
-     - Create parameters file (params.json) with required values
-     - Deploy: aws cloudformation deploy --template-file fargate.yaml --stack-name fluidity --parameter-overrides file://params.json --capabilities CAPABILITY_NAMED_IAM
+     - Deploy with certificates: ./scripts/deploy-fluidity.sh fargate deploy
      - Start: aws ecs update-service --cluster fluidity --service fluidity-server --desired-count 1
      - Stop:  aws ecs update-service --cluster fluidity --service fluidity-server --desired-count 0
   
   5. AGENT CONNECTION:
+     - Client certificates are in ./certs/ after running manage-certs.sh
      - After starting (DesiredCount=1), wait ~60 seconds for task to be running
      - Get public IP using the GetPublicIPCommand output
      - Configure agent with: server_ip=<PUBLIC_IP>, server_port=8443
-     - Agent connects with mTLS using same CA as server
+     - Agent connects with mTLS using local certificate files
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -64,6 +67,12 @@ Metadata:
         Parameters:
           - LogGroupName
           - LogRetentionDays
+      - Label:
+          default: "Certificates (Base64-encoded PEM)"
+        Parameters:
+          - CertPem
+          - KeyPem
+          - CaPem
 
 Parameters:
   ClusterName:
@@ -122,14 +131,50 @@ Parameters:
     Default: 14
     AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653]
     Description: Log retention in days
+  CertPem:
+    Type: String
+    NoEcho: true
+    Description: Base64-encoded server certificate PEM (from manage-certs.sh)
+  KeyPem:
+    Type: String
+    NoEcho: true
+    Description: Base64-encoded server private key PEM (from manage-certs.sh)
+  CaPem:
+    Type: String
+    NoEcho: true
+    Description: Base64-encoded CA certificate PEM (from manage-certs.sh)
 
 Resources:
+  # ============================================================================
+  # CERTIFICATE MANAGEMENT
+  # ============================================================================
+  
+  CertificateSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: fluidity/certificates
+      Description: mTLS certificates for Fluidity server and agent
+      SecretString: !Sub |
+        {
+          "cert_pem": "${CertPem}",
+          "key_pem": "${KeyPem}",
+          "ca_pem": "${CaPem}"
+        }
+  
+  # ============================================================================
+  # LOGGING
+  # ============================================================================
+  
   LogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Ref LogGroupName
       RetentionInDays: !Ref LogRetentionDays
 
+  # ============================================================================
+  # IAM ROLES
+  # ============================================================================
+  
   ExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -143,6 +188,15 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref CertificateSecret
       Path: '/'
 
   TaskRole:
@@ -204,6 +258,16 @@ Resources:
           PortMappings:
             - ContainerPort: !Ref ContainerPort
               Protocol: tcp
+          Secrets:
+            - Name: CERT_PEM
+              ValueFrom: !Sub '${CertificateSecret}:cert_pem::'
+            - Name: KEY_PEM
+              ValueFrom: !Sub '${CertificateSecret}:key_pem::'
+            - Name: CA_PEM
+              ValueFrom: !Sub '${CertificateSecret}:ca_pem::'
+          Environment:
+            - Name: USE_SECRETS_MANAGER
+              Value: 'true'
           HealthCheck:
             Command:
               - CMD-SHELL
@@ -218,9 +282,6 @@ Resources:
               awslogs-group: !Ref LogGroupName
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: ecs
-          # Note: Certificates must be baked into the image or mounted from EFS/Secrets Manager
-          # The container expects certificates at /root/certs/ as defined in Dockerfile
-          # Environment variables can override config file settings if implemented in code
 
   Service:
     Type: AWS::ECS::Service
@@ -278,6 +339,12 @@ Outputs:
     Value: !GetAtt ExecutionRole.Arn
     Export:
       Name: !Sub '${AWS::StackName}-ExecutionRoleArn'
+  
+  CertificateSecretArn:
+    Description: ARN of the Secrets Manager secret containing certificates
+    Value: !Ref CertificateSecret
+    Export:
+      Name: !Sub '${AWS::StackName}-CertificateSecretArn'
   
   GetPublicIPCommand:
     Description: AWS CLI command to get the task's public IP (after starting)

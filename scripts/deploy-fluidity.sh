@@ -118,22 +118,56 @@ deploy_stack() {
     echo ""
     echo "=== Deploying $stack_name ==="
     
+    # Check if this is the Fargate stack and certificates are needed
+    local cert_params=""
+    if [[ "$stack_name" == *"fargate"* ]]; then
+        local certs_dir="$(dirname "$SCRIPT_DIR")/certs"
+        
+        if [[ ! -f "$certs_dir/server.crt" ]] || [[ ! -f "$certs_dir/server.key" ]] || [[ ! -f "$certs_dir/ca.crt" ]]; then
+            echo "Error: Certificates not found in $certs_dir"
+            echo "Run './scripts/manage-certs.sh' first to generate certificates"
+            exit 1
+        fi
+        
+        echo "Reading certificates from $certs_dir..."
+        local cert_pem=$(base64 -i "$certs_dir/server.crt" | tr -d '\n')
+        local key_pem=$(base64 -i "$certs_dir/server.key" | tr -d '\n')
+        local ca_pem=$(base64 -i "$certs_dir/ca.crt" | tr -d '\n')
+        
+        cert_params="ParameterKey=CertPem,ParameterValue=$cert_pem ParameterKey=KeyPem,ParameterValue=$key_pem ParameterKey=CaPem,ParameterValue=$ca_pem"
+    fi
+    
     local status
     status=$(get_stack_status "$stack_name")
     
     if [[ "$status" == "DOES_NOT_EXIST" ]]; then
         echo "Creating new stack: $stack_name"
         
-        aws cloudformation create-stack \
-            --stack-name "$stack_name" \
-            --template-body "file://$template" \
-            --parameters "file://$PARAMETERS_FILE" \
-            --capabilities "$CAPABILITIES" \
-            --tags \
-                "Key=Environment,Value=$ENVIRONMENT" \
-                "Key=Application,Value=Fluidity" \
-                "Key=ManagedBy,Value=CloudFormation" \
-            --output text
+        if [[ -n "$cert_params" ]]; then
+            # Deploy with certificate parameters
+            aws cloudformation create-stack \
+                --stack-name "$stack_name" \
+                --template-body "file://$template" \
+                --parameters "file://$PARAMETERS_FILE" $cert_params \
+                --capabilities "$CAPABILITIES" \
+                --tags \
+                    "Key=Environment,Value=$ENVIRONMENT" \
+                    "Key=Application,Value=Fluidity" \
+                    "Key=ManagedBy,Value=CloudFormation" \
+                --output text
+        else
+            # Deploy without certificate parameters
+            aws cloudformation create-stack \
+                --stack-name "$stack_name" \
+                --template-body "file://$template" \
+                --parameters "file://$PARAMETERS_FILE" \
+                --capabilities "$CAPABILITIES" \
+                --tags \
+                    "Key=Environment,Value=$ENVIRONMENT" \
+                    "Key=Application,Value=Fluidity" \
+                    "Key=ManagedBy,Value=CloudFormation" \
+                --output text
+        fi
         
         echo "Waiting for stack creation..."
         aws cloudformation wait stack-create-complete --stack-name "$stack_name"
@@ -141,16 +175,34 @@ deploy_stack() {
     else
         echo "Updating existing stack: $stack_name (Current status: $status)"
         
-        if aws cloudformation update-stack \
-            --stack-name "$stack_name" \
-            --template-body "file://$template" \
-            --parameters "file://$PARAMETERS_FILE" \
-            --capabilities "$CAPABILITIES" \
-            --tags \
-                "Key=Environment,Value=$ENVIRONMENT" \
-                "Key=Application,Value=Fluidity" \
-                "Key=ManagedBy,Value=CloudFormation" \
-            --output text 2>&1 | grep -q "No updates are to be performed"; then
+        local update_output
+        if [[ -n "$cert_params" ]]; then
+            # Update with certificate parameters
+            update_output=$(aws cloudformation update-stack \
+                --stack-name "$stack_name" \
+                --template-body "file://$template" \
+                --parameters "file://$PARAMETERS_FILE" $cert_params \
+                --capabilities "$CAPABILITIES" \
+                --tags \
+                    "Key=Environment,Value=$ENVIRONMENT" \
+                    "Key=Application,Value=Fluidity" \
+                    "Key=ManagedBy,Value=CloudFormation" \
+                --output text 2>&1 || true)
+        else
+            # Update without certificate parameters
+            update_output=$(aws cloudformation update-stack \
+                --stack-name "$stack_name" \
+                --template-body "file://$template" \
+                --parameters "file://$PARAMETERS_FILE" \
+                --capabilities "$CAPABILITIES" \
+                --tags \
+                    "Key=Environment,Value=$ENVIRONMENT" \
+                    "Key=Application,Value=Fluidity" \
+                    "Key=ManagedBy,Value=CloudFormation" \
+                --output text 2>&1 || true)
+        fi
+        
+        if echo "$update_output" | grep -q "No updates are to be performed"; then
             echo "✓ Stack is already up to date (no changes)"
         else
             echo "Waiting for stack update..."
