@@ -670,6 +670,137 @@ Resources:
       KeyType: API_KEY
       UsagePlanId: !Ref FluidityUsagePlan
 
+  # ========================================
+  # Monitoring & Observability
+  # ========================================
+
+  # SNS Topic for Alarm Notifications
+  AlarmNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${AWS::StackName}-alarms'
+      DisplayName: 'Fluidity Lambda Control Plane Alarms'
+
+  # CloudWatch Alarm: Lambda Errors
+  WakeLambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-wake-lambda-errors'
+      AlarmDescription: 'Alert when Wake Lambda has execution errors'
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref WakeLambdaFunction
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      TreatMissingData: notBreaching
+
+  SleepLambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-sleep-lambda-errors'
+      AlarmDescription: 'Alert when Sleep Lambda has execution errors'
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref SleepLambdaFunction
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      TreatMissingData: notBreaching
+
+  KillLambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-kill-lambda-errors'
+      AlarmDescription: 'Alert when Kill Lambda has execution errors'
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref KillLambdaFunction
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      TreatMissingData: notBreaching
+
+  # CloudWatch Dashboard
+  FluidityDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub '${AWS::StackName}-dashboard'
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  [ "AWS/Lambda", "Invocations", { "stat": "Sum" } ],
+                  [ ".", "Errors", { "stat": "Sum" } ],
+                  [ ".", "Duration", { "stat": "Average" } ],
+                  [ ".", "Throttles", { "stat": "Sum" } ]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "Lambda Metrics (All Functions)"
+              }
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  [ "Fluidity", "ActiveConnections", { "stat": "Maximum" } ],
+                  [ ".", "LastActivityEpochSeconds", { "stat": "Maximum" } ]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "Fluidity Server Metrics"
+              }
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  [ "AWS/ApiGateway", "Count", { "stat": "Sum" } ],
+                  [ ".", "4XXError", { "stat": "Sum" } ],
+                  [ ".", "5XXError", { "stat": "Sum" } ]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "API Gateway Metrics"
+              }
+            },
+            {
+              "type": "log",
+              "properties": {
+                "query": "fields @timestamp, @message | filter @message like /ERROR/ | stats count() by bin(300s)",
+                "region": "${AWS::Region}",
+                "title": "Lambda Errors (Last Hour)",
+                "queryId": "error-logs"
+              }
+            }
+          ]
+        }
+
 Outputs:
   WakeLambdaArn:
     Description: ARN of the Wake Lambda function
@@ -748,3 +879,26 @@ Outputs:
   KillScheduleRuleName:
     Description: Name of the EventBridge rule for Kill Lambda
     Value: !Ref KillScheduleRule
+
+  # Monitoring & Observability Outputs
+  AlarmNotificationTopicArn:
+    Description: ARN of SNS topic for alarm notifications
+    Value: !Ref AlarmNotificationTopic
+    Export:
+      Name: !Sub '${AWS::StackName}-alarm-topic-arn'
+
+  DashboardURL:
+    Description: URL to CloudWatch Dashboard
+    Value: !Sub 'https://console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${AWS::StackName}-dashboard'
+
+  WakeLambdaErrorAlarmName:
+    Description: Name of Wake Lambda error alarm
+    Value: !Ref WakeLambdaErrorAlarm
+
+  SleepLambdaErrorAlarmName:
+    Description: Name of Sleep Lambda error alarm
+    Value: !Ref SleepLambdaErrorAlarm
+
+  KillLambdaErrorAlarmName:
+    Description: Name of Kill Lambda error alarm
+    Value: !Ref KillLambdaErrorAlarm

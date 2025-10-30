@@ -180,6 +180,53 @@ aws cloudformation set-stack-policy `
 
 ## Monitoring
 
+### CloudWatch Alarms
+
+Three CloudWatch alarms are automatically created:
+- **Wake Lambda Errors**: Alerts when Wake Lambda execution fails
+- **Sleep Lambda Errors**: Alerts when Sleep Lambda execution fails
+- **Kill Lambda Errors**: Alerts when Kill Lambda execution fails
+
+All alarms send notifications to an SNS topic configured during deployment.
+
+**Configure Email Notifications:**
+
+```bash
+# Get SNS topic ARN from stack outputs
+TOPIC_ARN=$(aws cloudformation describe-stacks \
+  --stack-name fluidity-lambda \
+  --query 'Stacks[0].Outputs[?OutputKey==`AlarmNotificationTopicArn`].OutputValue' \
+  --output text)
+
+# Subscribe your email
+aws sns subscribe \
+  --topic-arn $TOPIC_ARN \
+  --protocol email \
+  --notification-endpoint your-email@example.com
+```
+
+Confirm the subscription email from AWS SNS.
+
+### CloudWatch Dashboard
+
+A dashboard is automatically created with:
+- Lambda metrics (invocations, errors, duration, throttles)
+- Fluidity server metrics (active connections, last activity)
+- API Gateway metrics (requests, 4xx/5xx errors)
+- Lambda error logs from the last hour
+
+**Access Dashboard:**
+
+```bash
+# Get dashboard URL from stack outputs
+aws cloudformation describe-stacks \
+  --stack-name fluidity-lambda \
+  --query 'Stacks[0].Outputs[?OutputKey==`DashboardURL`].OutputValue' \
+  --output text
+```
+
+Or access via AWS Console: CloudWatch → Dashboards → `fluidity-dashboard`
+
 ### CloudWatch Logs
 
 ```bash
@@ -187,42 +234,38 @@ aws cloudformation set-stack-policy `
 aws logs tail /ecs/fluidity/server --follow
 
 # Lambda logs
-aws logs tail /aws/lambda/fluidity-prod-wake --follow
-aws logs tail /aws/lambda/fluidity-prod-sleep --follow
-aws logs tail /aws/lambda/fluidity-prod-kill --follow
+aws logs tail /aws/lambda/fluidity-wake --follow
+aws logs tail /aws/lambda/fluidity-sleep --follow
+aws logs tail /aws/lambda/fluidity-kill --follow
 
 # API Gateway logs
-aws logs tail /aws/apigateway/fluidity-prod-api-execution --follow
+aws logs tail /aws/apigateway/fluidity-api-execution --follow
 ```
 
 ### CloudWatch Metrics
 
 ```bash
+# Server active connections
 aws cloudwatch get-metric-statistics \
   --namespace Fluidity \
   --metric-name ActiveConnections \
-  --dimensions Name=ServiceName,Value=fluidity-server-prod \
+  --dimensions Name=ServiceName,Value=fluidity-server \
   --statistics Maximum,Average \
   --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S) \
   --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
   --period 300 \
   --output table
-```
 
-### Create CloudWatch Alarm
-
-```bash
-aws cloudwatch put-metric-alarm \
-  --alarm-name fluidity-prod-high-error-rate \
-  --alarm-description "Alert if Lambda error rate is high" \
-  --metric-name Errors \
+# Lambda invocations
+aws cloudwatch get-metric-statistics \
   --namespace AWS/Lambda \
-  --statistic Sum \
+  --metric-name Invocations \
+  --dimensions Name=FunctionName,Value=fluidity-wake \
+  --statistics Sum \
+  --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
   --period 300 \
-  --threshold 5 \
-  --comparison-operator GreaterThanThreshold \
-  --evaluation-periods 1 \
-  --dimensions Name=FunctionName,Value=fluidity-prod-wake
+  --output table
 ```
 
 ## Troubleshooting

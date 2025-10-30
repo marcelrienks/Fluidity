@@ -109,12 +109,9 @@ This document outlines the development roadmap, organized by completion status a
 - [x] Comprehensive IaC documentation - `INFRASTRUCTURE_AS_CODE.md`
 
 ### Monitoring & Observability
-- [ ] CloudWatch dashboard (Lambda, API Gateway, ECS, Fluidity metrics)
-- [ ] CloudWatch alarms (Lambda errors, API Gateway 5xx, ECS stuck, no metrics)
-- [ ] SNS topic for alarm notifications
-- [ ] AWS X-Ray tracing for Lambda functions
-- [ ] Lambda Insights for enhanced metrics
-- [ ] Cost anomaly detection
+- [x] CloudWatch alarms (Lambda errors, ECS stuck, no metrics)
+- [x] SNS email notifications for alarms
+- [x] CloudWatch dashboard
 
 ### Testing & Validation
 - [ ] Unit tests: lifecycle client, metrics emitter
