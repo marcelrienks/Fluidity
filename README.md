@@ -39,41 +39,54 @@ make -f Makefile.<platform> run-agent-local   # Terminal 2
 curl -x http://127.0.0.1:8080 http://example.com
 ```
 
-📖 **Full setup**: [Deployment Guide](docs/deployment.md)
+---
 
-## Documentation
+## Documentation Guide
 
-### Core Documentation
-- **[Deployment Guide](docs/deployment.md)** - Local, Docker, AWS Fargate setup
-- **[Architecture](docs/architecture.md)** - System design and components
-- **[Testing](docs/testing.md)** - Unit, integration, and E2E tests
+### � Getting Started
 
-### Deployment-Specific
-- **[Infrastructure as Code](docs/infrastructure.md)** - CloudFormation templates and automated deployment
-- **[Docker](docs/docker.md)** - Container builds and networking
-- **[AWS Fargate](docs/fargate.md)** - Cloud deployment guide
-- **[Lambda Functions](docs/lambda.md)** - Automated lifecycle management
-- **[Operational Runbook](docs/operational-runbook.md)** - Manual procedures and troubleshooting
+| Document | Summary | Best For |
+|----------|---------|----------|
+| **[Architecture](docs/architecture.md)** | System design, component overview, protocol details, mTLS security model, deployment architectures. Includes threat model and performance considerations. | Understanding how Fluidity works internally |
+| **[Deployment Guide](docs/deployment.md)** | Quick reference for all 5 deployment options (local, Docker, Fargate manual, CloudFormation, Lambda control plane) with cost comparison and common troubleshooting. | Choosing and setting up your deployment |
+| **[Product Requirements](docs/product.md)** | Feature specification, user stories, success metrics, functional requirements for Phase 1-3. | Project scope and planning reference |
 
-### Lambda Control Plane (Phase 2)
+### 🚀 Deployment & Operations
 
-**Automated lifecycle management with cost optimization:**
+| Document | Summary | Best For |
+|----------|---------|----------|
+| **[Docker Guide](docs/docker.md)** | Containerization approach, build process, networking for Docker Desktop, image sizes (~44MB), and troubleshooting. Explains why single-stage builds work in corporate environments. | Building and testing containerized deployment |
+| **[AWS Fargate](docs/fargate.md)** | Step-by-step manual Fargate deployment: ECR setup, task definition, service creation, public IP retrieval. Cost ~$0.50-3/month. | Deploying server to AWS cloud manually |
+| **[Infrastructure as Code](docs/infrastructure.md)** | CloudFormation templates for Fargate and Lambda stacks, parameterized deployment, drift detection, stack protection, monitoring dashboards, and cost analysis. | Automated repeatable infrastructure deployment |
+| **[Lambda Functions](docs/lambda.md)** | Control plane architecture: Wake (start server), Sleep (auto-scale on idle), Kill (shutdown). API Gateway endpoints, EventBridge schedulers, IAM roles, cost optimization. | Automated lifecycle management with cost savings |
+| **[Operational Runbook](docs/runbook.md)** | Daily operations procedures, manual lifecycle control, monitoring and alerting, troubleshooting guide, incident response, maintenance tasks. | Running Fluidity in production |
 
-The Lambda control plane provides serverless automation for Fargate:
-- **Wake Lambda:** Agent calls on startup → Fargate task starts in 30-60s
-- **Sleep Lambda:** Periodic scheduler → auto-stops server when idle
-- **Kill Lambda:** Graceful shutdown on agent exit or daily schedule
+### 🧪 Testing & Development
 
-**Cost impact:** $0.05/month (Lambda) + Fargate usage = **$0.55-$3.05/month** with auto-idle
+| Document | Summary | Best For |
+|----------|---------|----------|
+| **[Testing Guide](docs/testing.md)** | Three-tier testing strategy: unit tests (17), integration tests (30+), E2E tests (6). Coverage targets, CI/CD examples, debugging tips, performance profiling. | Writing tests and validating code quality |
 
-**Setup:** See [Lambda Functions Guide](docs/lambda.md) and [Fargate Integration](docs/fargate.md#lambda-control-plane-integration)
+### 📋 Planning & Status
 
-### Testing & Validation
-- **[Testing Summary](docs/TESTING_SUMMARY.md)** - Unit tests, coverage, and validation results
+| Document | Summary | Best For |
+|----------|---------|----------|
+| **[Development Plan](docs/plan.md)** | Project roadmap by phase: Phase 1 complete (core tunneling), Phase 2 in-progress (Lambda control plane), Phase 3 planned (CI/CD, hardening). Feature checklist and implementation status. | Tracking project progress and roadmap |
 
-### Project Planning
-- **[Product Requirements](docs/product.md)** - Features and specifications
-- **[Development Plan](docs/plan.md)** - Roadmap and status
+---
+
+## Quick Lookup by Task
+
+- **Just want to tunnel locally?** → [Quick Start](#quick-start) + [Deployment Guide](docs/deployment.md#option-a-local-development)
+- **Testing containerization?** → [Docker Guide](docs/docker.md) + [Deployment Guide](docs/deployment.md#option-b-docker)
+- **Deploying to AWS manually?** → [AWS Fargate](docs/fargate.md)
+- **Setting up production infrastructure?** → [Infrastructure as Code](docs/infrastructure.md) + [Lambda Functions](docs/lambda.md)
+- **Understanding the system?** → [Architecture](docs/architecture.md)
+- **Running in production?** → [Operational Runbook](docs/runbook.md)
+- **Writing tests?** → [Testing Guide](docs/testing.md)
+- **Understanding requirements?** → [Product Requirements](docs/product.md)
+
+---
 
 ## Disclaimer
 

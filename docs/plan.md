@@ -133,23 +133,27 @@ This document outlines the development roadmap, organized by completion status a
 
 ## 🚀 Phase 3: Production Readiness (PERSONAL USE OPTIMIZED)
 
-### Prerequisites
-- [ ] Store certificates in AWS Secrets Manager
-  - Create secret: `fluidity/certificates` (JSON with base64-encoded certs)
-  - Required before code updates
-- [ ] Update server code to fetch certs from Secrets Manager on startup
-  - Modify server startup to call SecretsManager API
-  - Test locally with AWS credentials
-  - Reference: AWS SDK v2 SecretsManager client
-- [ ] Update agent code to fetch certs from Secrets Manager on startup
-  - Modify agent startup to call SecretsManager API
-  - Test locally with AWS credentials
-- [ ] Add `/health` endpoint to server
-  - Returns 200 OK with connection count and uptime
-  - Test locally
-- [ ] Add `/health` endpoint to agent
-  - Returns 200 OK with connection status
-  - Test locally
+### Prerequisites ✅ COMPLETED
+- [x] Store certificates in AWS Secrets Manager
+  - Created `internal/shared/secretsmanager/secrets.go` package
+  - Supports `SaveCertificatesToSecrets()` utility function
+  - Scripts: `scripts/save-certs-to-secrets.sh` and `.ps1`
+- [x] Update server code to fetch certs from Secrets Manager on startup
+  - Added `use_secrets_manager` and `secrets_manager_name` config options
+  - Server tries Secrets Manager first, falls back to local files
+  - 30-second timeout with graceful degradation
+- [x] Update agent code to fetch certs from Secrets Manager on startup
+  - Added `use_secrets_manager` and `secrets_manager_name` config options
+  - Agent tries Secrets Manager first, falls back to local files
+  - Works with lifecycle management
+- [x] Add `/health` endpoint to server
+  - HTTP endpoint on port 8080: `GET /health`
+  - Returns active connections, uptime, max connections, utilization %
+  - Integrated with server startup/shutdown
+- [x] Add `/health` endpoint to agent
+  - HTTP endpoint on proxy port: `GET /health`
+  - Returns connection status, uptime, proxy port, server address
+  - Separate from tunnel traffic
 
 ### AWS Deployment
 - [ ] Deploy Fargate stack to AWS using CloudFormation
