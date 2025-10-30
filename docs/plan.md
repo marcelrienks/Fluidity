@@ -131,37 +131,48 @@ This document outlines the development roadmap, organized by completion status a
 
 ---
 
-## 📋 Phase 3: Production Readiness (PLANNED)
+## 🚀 Phase 3: Production Readiness (PERSONAL USE OPTIMIZED)
+
+### Prerequisites
+- [ ] Store certificates in AWS Secrets Manager
+  - Create secret: `fluidity/certificates` (JSON with base64-encoded certs)
+  - Required before code updates
+- [ ] Update server code to fetch certs from Secrets Manager on startup
+  - Modify server startup to call SecretsManager API
+  - Test locally with AWS credentials
+  - Reference: AWS SDK v2 SecretsManager client
+- [ ] Update agent code to fetch certs from Secrets Manager on startup
+  - Modify agent startup to call SecretsManager API
+  - Test locally with AWS credentials
+- [ ] Add `/health` endpoint to server
+  - Returns 200 OK with connection count and uptime
+  - Test locally
+- [ ] Add `/health` endpoint to agent
+  - Returns 200 OK with connection status
+  - Test locally
 
 ### AWS Deployment
-- [ ] Deploy to AWS ECS Fargate (CloudFormation)
-- [ ] Configure VPC, subnets, security groups
-- [ ] Set up ECR for Docker images
-- [ ] Configure CloudWatch Logs
+- [ ] Deploy Fargate stack to AWS using CloudFormation
+  - Requires: Server code updated to use Secrets Manager
+  - Reference: `docs/infrastructure.md` and `docs/fargate.md`
+- [ ] Deploy Lambda stack to AWS using CloudFormation
+  - Reference: `docs/lambda.md` and `docs/infrastructure.md`
+- [ ] End-to-end testing (wake → connect → metrics → kill)
+  - Verify server starts and fetches certs from Secrets Manager
+  - Verify agent connects with health check
+  - Check metrics flow to CloudWatch
+- [ ] Configure SNS email alerts
+  - Subscribe email to alarm topic
+  - Test alarm notifications
 
-### CI/CD Pipeline
-- [ ] GitHub Actions or AWS CodePipeline
-- [ ] Automated builds on commit
-- [ ] Automated testing (unit, integration, E2E)
-- [ ] Automated deployment to dev/staging/prod
+---
 
-### Security Hardening
-- [ ] CloudWatch Logs encryption (KMS)
-- [ ] Secrets Manager for API keys and certificates
-- [ ] WAF integration for API Gateway
-- [ ] Certificate renewal and rotation automation
-- [ ] Security audit and vulnerability assessment
+## Related Documentation
 
-### Performance Optimization
-- [ ] Connection pooling optimization
-- [ ] Load testing and benchmarking
-- [ ] Identify and fix bottlenecks
-
-### Monitoring & Health
-- [ ] Health check endpoints (agent, server)
-- [ ] Metrics collection and dashboards
-- [ ] Distributed tracing
-- [ ] Log aggregation and analysis
+- **[Infrastructure as Code](infrastructure.md)** - CloudFormation deployment details
+- **[Fargate Deployment](fargate.md)** - Cloud setup and Lambda integration
+- **[Lambda Functions](lambda.md)** - Control plane functions and configuration
+- **[Operational Runbook](operational-runbook.md)** - Day-to-day operations and troubleshooting
 
 ---
 
