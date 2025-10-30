@@ -114,12 +114,12 @@ This document outlines the development roadmap, organized by completion status a
 - [x] CloudWatch dashboard
 
 ### Testing & Validation
-- [ ] Unit tests: lifecycle client, metrics emitter
-- [ ] Integration tests: Wake/Sleep/Kill → ECS updates
-- [ ] E2E test: agent startup → wake → connect → shutdown → kill
-- [ ] E2E test: idle detection → automatic sleep
-- [ ] Load test: concurrent wake/kill calls
-- [ ] Test failure scenarios (timeouts, API errors, network failures)
+- [x] Unit tests: lifecycle client, metrics emitter
+- [x] Integration tests: Wake/Sleep/Kill → ECS updates
+- [x] E2E test: agent startup → wake → connect → shutdown → kill
+- [x] E2E test: idle detection → automatic sleep
+- [x] Load test: concurrent wake/kill calls
+- [x] Test failure scenarios (timeouts, API errors, network failures)
 
 ### Documentation
 - [x] Update architecture.md with Lambda design
@@ -128,9 +128,6 @@ This document outlines the development roadmap, organized by completion status a
 - [ ] Update fargate.md with Lambda integration
 - [ ] Update README.md with Lambda overview
 - [ ] Operational runbook (manual wake/sleep/kill, troubleshooting)
-- [ ] Cost optimization guide
-- [ ] Edge case documentation (race conditions, stuck ECS, quotas)
-- [ ] Architecture Decision Records (ADRs)
 
 ---
 

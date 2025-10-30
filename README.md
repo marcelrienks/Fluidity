@@ -54,6 +54,9 @@ curl -x http://127.0.0.1:8080 http://example.com
 - **[AWS Fargate](docs/fargate.md)** - Cloud deployment guide
 - **[Lambda Functions](docs/lambda.md)** - Automated lifecycle management
 
+### Testing & Validation
+- **[Testing Summary](docs/TESTING_SUMMARY.md)** - Unit tests, coverage, and validation results
+
 ### Project Planning
 - **[Product Requirements](docs/product.md)** - Features and specifications
 - **[Development Plan](docs/plan.md)** - Roadmap and status
