@@ -26,8 +26,8 @@ Fluidity tunnels HTTP/HTTPS/WebSocket traffic through restrictive firewalls usin
 
 ```bash
 # 1. Generate certificates
-./scripts/generate-certs.sh  # macOS/Linux
-.\scripts\generate-certs.ps1  # Windows
+./scripts/manage-certs.sh  # macOS/Linux
+.\scripts\manage-certs.ps1  # Windows
 
 # 2. Run server and agent
 make -f Makefile.<platform> run-server-local  # Terminal 1
@@ -43,31 +43,37 @@ curl -x http://127.0.0.1:8080 http://example.com
 
 ## Documentation Guide
 
-### � Getting Started
+### 📚 Complete Documentation Index
+
+All documentation has been organized in the `docs/` folder for easy reference.
+
+#### Getting Started
 
 | Document | Summary | Best For |
 |----------|---------|----------|
 | **[Architecture](docs/architecture.md)** | System design, component overview, protocol details, mTLS security model, deployment architectures. Includes threat model and performance considerations. | Understanding how Fluidity works internally |
-| **[Deployment Guide](docs/deployment.md)** | Quick reference for all 5 deployment options (local, Docker, Fargate manual, CloudFormation, Lambda control plane) with cost comparison and common troubleshooting. | Choosing and setting up your deployment |
+| **[Development Guide](docs/development.md)** | Local development workflow, build commands, architecture deep dive, code patterns, debugging tips. Comprehensive guide for developers from setup to testing. | Setting up development environment and contributing |
 | **[Product Requirements](docs/product.md)** | Feature specification, user stories, success metrics, functional requirements for Phase 1-3. | Project scope and planning reference |
 
-### 🚀 Deployment & Operations
+#### Deployment & Operations
 
 | Document | Summary | Best For |
 |----------|---------|----------|
+| **[Deployment Guide](docs/deployment.md)** | Quick reference for all 5 deployment options (local, Docker, Fargate manual, CloudFormation, Lambda control plane) with cost comparison and troubleshooting. | Choosing and setting up your deployment |
 | **[Docker Guide](docs/docker.md)** | Containerization approach, build process, networking for Docker Desktop, image sizes (~44MB), and troubleshooting. Explains why single-stage builds work in corporate environments. | Building and testing containerized deployment |
 | **[AWS Fargate](docs/fargate.md)** | Step-by-step manual Fargate deployment: ECR setup, task definition, service creation, public IP retrieval. Cost ~$0.50-3/month. | Deploying server to AWS cloud manually |
-| **[Infrastructure as Code](docs/infrastructure.md)** | CloudFormation templates for Fargate and Lambda stacks, parameterized deployment, drift detection, stack protection, monitoring dashboards, and cost analysis. | Automated repeatable infrastructure deployment |
+| **[Infrastructure as Code](docs/infrastructure.md)** | CloudFormation templates for Fargate and Lambda stacks, parameterized deployment, drift detection, stack protection, monitoring dashboards, cost analysis, and Docker image management. | Automated repeatable infrastructure deployment |
 | **[Lambda Functions](docs/lambda.md)** | Control plane architecture: Wake (start server), Sleep (auto-scale on idle), Kill (shutdown). API Gateway endpoints, EventBridge schedulers, IAM roles, cost optimization. | Automated lifecycle management with cost savings |
 | **[Operational Runbook](docs/runbook.md)** | Daily operations procedures, manual lifecycle control, monitoring and alerting, troubleshooting guide, incident response, maintenance tasks. | Running Fluidity in production |
+| **[Certificate Management](docs/certificate-management.md)** | Certificate generation and management, AWS Secrets Manager integration, local file management, security best practices. | Setting up and rotating TLS certificates |
 
-### 🧪 Testing & Development
+#### Testing & Development
 
 | Document | Summary | Best For |
 |----------|---------|----------|
-| **[Testing Guide](docs/testing.md)** | Three-tier testing strategy: unit tests (17), integration tests (30+), E2E tests (6). Coverage targets, CI/CD examples, debugging tips, performance profiling. | Writing tests and validating code quality |
+| **[Testing Guide](docs/testing.md)** | Three-tier testing strategy: unit tests (17), integration tests (30+), E2E tests (6). Coverage targets, CI/CD examples, debugging tips, performance profiling, and integration test organization. | Writing tests and validating code quality |
 
-### 📋 Planning & Status
+#### Planning & Status
 
 | Document | Summary | Best For |
 |----------|---------|----------|
@@ -75,9 +81,10 @@ curl -x http://127.0.0.1:8080 http://example.com
 
 ---
 
-## Quick Lookup by Task
+### Quick Lookup by Task
 
 - **Just want to tunnel locally?** → [Quick Start](#quick-start) + [Deployment Guide](docs/deployment.md#option-a-local-development)
+- **Setting up for development?** → [Development Guide](docs/development.md)
 - **Testing containerization?** → [Docker Guide](docs/docker.md) + [Deployment Guide](docs/deployment.md#option-b-docker)
 - **Deploying to AWS manually?** → [AWS Fargate](docs/fargate.md)
 - **Setting up production infrastructure?** → [Infrastructure as Code](docs/infrastructure.md) + [Lambda Functions](docs/lambda.md)
@@ -85,6 +92,8 @@ curl -x http://127.0.0.1:8080 http://example.com
 - **Running in production?** → [Operational Runbook](docs/runbook.md)
 - **Writing tests?** → [Testing Guide](docs/testing.md)
 - **Understanding requirements?** → [Product Requirements](docs/product.md)
+- **Setting up certificates?** → [Certificate Management](docs/certificate-management.md)
+- **Viewing project progress?** → [Development Plan](docs/plan.md)
 
 ---
 

@@ -23,7 +23,7 @@ docker push YOUR_ACCOUNT_ID.dkr.ecr.YOUR_REGION.amazonaws.com/fluidity-server:la
 
 ### 2. Configure Parameters
 
-Edit `deployments/cloudformation/params-prod.json`:
+Edit `deployments/cloudformation/params.json`:
 - Replace `YOUR_ACCOUNT_ID`, `YOUR_REGION`
 - Set `VpcId` and `PublicSubnets`
 - Set `AllowedIngressCidr` to your public IP (`x.x.x.x/32`)
@@ -425,10 +425,86 @@ jobs:
 └──────────────────────────────────────────────────────────┘
 ```
 
+## Building and Pushing Docker Image to ECR
+
+### Prerequisites
+
+1. **AWS CLI** v2 installed and configured
+2. **Docker** installed and configured
+3. **AWS ECR** repository created
+
+### Quick Start
+
+```bash
+# Create ECR repository
+aws ecr create-repository --repository-name fluidity-server --region us-east-1
+
+# Get ECR login
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 123456789012.dkr.ecr.us-east-1.amazonaws.com
+
+# Build image with certificates baked in
+# IMPORTANT: Certificates must be in the certs/ directory before building
+cd deployments
+make -f ../Makefile.<platform> docker-build-server  # windows, linux, or macos
+
+# Tag for ECR
+docker tag fluidity-server:latest 123456789012.dkr.ecr.us-east-1.amazonaws.com/fluidity-server:latest
+
+# Push to ECR
+docker push 123456789012.dkr.ecr.us-east-1.amazonaws.com/fluidity-server:latest
+```
+
+### Baking Certificates into Docker Image
+
+The Docker image must include TLS certificates at `/root/certs/`. The simplest approach:
+
+1. Generate certificates locally:
+   ```bash
+   ./scripts/manage-certs.sh  # or manage-certs.ps1 on Windows
+   ```
+
+2. Modify `deployments/server/Dockerfile` to copy certificates:
+   ```dockerfile
+   # Add after COPY build/fluidity-server .
+   COPY certs/ca.crt ./certs/
+   COPY certs/server.crt ./certs/
+   COPY certs/server.key ./certs/
+   ```
+
+3. Rebuild and push:
+   ```bash
+   make -f Makefile.<platform> docker-build-server
+   docker tag fluidity-server:latest <ECR_URI>
+   docker push <ECR_URI>
+   ```
+
+### Alternative: Using AWS Secrets Manager
+
+For production deployments, store certificates in AWS Secrets Manager:
+
+1. Store certificates:
+   ```bash
+   aws secretsmanager create-secret \
+     --name fluidity/server/ca-cert \
+     --secret-string file://certs/ca.crt
+   
+   aws secretsmanager create-secret \
+     --name fluidity/server/server-cert \
+     --secret-string file://certs/server.crt
+   
+   aws secretsmanager create-secret \
+     --name fluidity/server/server-key \
+     --secret-string file://certs/server.key
+   ```
+
+2. Modify CloudFormation task definition to inject secrets as environment variables
+3. Update application to read from environment or write to files on startup
+
 ## Related Documentation
 
 - **[Deployment Guide](deployment.md)** - All deployment options
 - **[Architecture](architecture.md)** - System design
 - **[Fargate Guide](fargate.md)** - AWS ECS details
 - **[Lambda Guide](lambda.md)** - Control plane details
+- **[Certificate Management](certificate-management.md)** - Certificate generation
 - **[Project Plan](plan.md)** - Roadmap and progress

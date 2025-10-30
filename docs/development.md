@@ -1,6 +1,6 @@
-# WARP.md
+# Development Guide
 
-This file provides guidance to WARP (warp.dev) when working with code in this repository.
+This guide covers local development workflow, architecture, and common patterns for Fluidity developers.
 
 ## Project Overview
 
@@ -10,17 +10,17 @@ Fluidity is a Go-based HTTP tunnel solution that bypasses restrictive corporate 
 
 The architecture uses mTLS authentication with a private CA and supports both HTTP and HTTPS (via CONNECT) tunneling.
 
-## Common Development Commands
+## Prerequisites
 
-### Prerequisites
 - Go >= 1.21
 - Make
 - Docker (for containerized testing)
 - OpenSSL (for certificate generation)
 
-### Build Commands
+## Quick Build Commands
 
-**Windows (PowerShell):**
+### Windows (PowerShell)
+
 ```powershell
 # Build native binaries (for local debugging)
 make -f Makefile.win build
@@ -34,23 +34,26 @@ make -f Makefile.win docker-build-server-scratch
 make -f Makefile.win docker-build-agent-scratch
 ```
 
-**macOS:**
+### macOS
+
 ```bash
 make -f Makefile.macos build
 make -f Makefile.macos docker-build-server
 make -f Makefile.macos docker-build-agent
 ```
 
-**Linux:**
+### Linux
+
 ```bash
 make -f Makefile.linux build
 make -f Makefile.linux docker-build-server
 make -f Makefile.linux docker-build-agent
 ```
 
-### Running Locally (Native Binaries)
+## Running Locally
 
-**Windows:**
+### Windows
+
 ```powershell
 # Terminal 1 - Server
 make -f Makefile.win run-server-local
@@ -59,7 +62,8 @@ make -f Makefile.win run-server-local
 make -f Makefile.win run-agent-local
 ```
 
-**macOS/Linux:**
+### macOS/Linux
+
 ```bash
 # Terminal 1
 make -f Makefile.macos run-server-local  # or Makefile.linux
@@ -68,18 +72,24 @@ make -f Makefile.macos run-server-local  # or Makefile.linux
 make -f Makefile.macos run-agent-local   # or Makefile.linux
 ```
 
-### Testing
+## Testing
 
-**Generate development certificates (required before first run):**
+### Generate Development Certificates
+
+**Required before first run:**
+
 ```powershell
 # Windows
-./scripts/generate-certs.ps1
+./scripts/manage-certs.ps1 -Command generate
 
 # macOS/Linux
-./scripts/generate-certs.sh
+./scripts/manage-certs.sh
 ```
 
-**Automated end-to-end tests:**
+See [Certificate Management](certificate-management.md) for detailed options.
+
+### Automated End-to-End Tests
+
 ```powershell
 # Windows - Test Docker containers
 ./scripts/test-docker.ps1
@@ -98,7 +108,8 @@ make -f Makefile.macos run-agent-local   # or Makefile.linux
 ./scripts/test-local.sh --skip-build
 ```
 
-**Manual testing:**
+### Manual Testing
+
 ```powershell
 # Test HTTP tunneling
 curl -x http://127.0.0.1:8080 http://example.com -I
@@ -107,7 +118,7 @@ curl -x http://127.0.0.1:8080 http://example.com -I
 curl -x http://127.0.0.1:8080 https://example.com -I
 ```
 
-**Note**: There are no unit tests (`*_test.go` files) in this codebase. Testing is done via automated integration test scripts and manual validation.
+**Note**: There are no unit tests (`*_test.go` files) in this codebase. Testing is done via automated integration test scripts and manual validation. See [Testing Guide](testing.md) for details on integration testing.
 
 ## Code Architecture
 
@@ -119,18 +130,28 @@ cmd/
 └── server/main.go         # Server entry point with CLI flags
 
 internal/
-├── agent/
-│   ├── config/            # Agent configuration
-│   ├── proxy/server.go    # HTTP proxy server (listens on port 8080)
-│   └── tunnel/client.go   # TLS client connecting to server
-├── server/
-│   ├── config/            # Server configuration
-│   └── tunnel/server.go   # TLS server + HTTP forwarder
-└── shared/
-    ├── config/            # Generic config loading (Viper)
-    ├── logging/           # Structured logging (logrus)
-    ├── protocol/          # Wire protocol definitions
-    └── tls/               # mTLS utilities
+├── core/
+│   ├── agent/
+│   │   ├── config.go      # Agent configuration
+│   │   ├── proxy.go       # HTTP proxy server (listens on port 8080)
+│   │   └── lifecycle/     # Lifecycle management
+│   ├── server/
+│   │   ├── config.go      # Server configuration
+│   │   ├── server.go      # TLS server + HTTP forwarder
+│   │   └── metrics/       # Metrics collection
+│   ├── lambdas/           # Lambda function handlers
+│   │   ├── kill/
+│   │   ├── sleep/
+│   │   └── wake/
+│   └── shared/
+│       ├── circuitbreaker/  # Circuit breaker pattern
+│       ├── config/          # Generic config loading (Viper)
+│       ├── logger/          # Structured logging (logrus)
+│       ├── logging/         # Logger utilities
+│       ├── protocol/        # Wire protocol definitions
+│       ├── retry/           # Retry logic
+│       ├── secretsmanager/  # AWS Secrets Manager integration
+│       └── tls/             # mTLS utilities
 
 configs/                   # YAML configuration files
 ├── agent.local.yaml       # Agent config for native execution
@@ -168,7 +189,7 @@ configs/                   # YAML configuration files
 - **Agent**: Uses `tls.LoadClientTLSConfig()` with client cert, key, and CA cert
 - **Server**: Uses `tls.LoadServerTLSConfig()` with server cert, key, and CA cert
 - **Critical**: Agent must set `ServerName` in TLS config for proper SNI
-- Certificates are generated by `scripts/generate-certs.{sh,ps1}` using OpenSSL
+- Certificates are generated by `scripts/manage-certs.{sh,ps1}` using OpenSSL
 - Development certs are stored in `certs/` directory (ca.crt, server.crt/key, client.crt/key)
 
 ### Configuration Management
@@ -221,7 +242,8 @@ The default `Makefile` is for reference only.
 
 1. Generate certificates:
    ```powershell
-   ./scripts/generate-certs.ps1  # or .sh on macOS/Linux
+   .\scripts\manage-certs.ps1 -Command generate  # Windows
+   ./scripts/manage-certs.sh                      # macOS/Linux
    ```
 
 2. Build binaries:
@@ -239,17 +261,17 @@ The default `Makefile` is for reference only.
 
 ### Making Code Changes
 
-**When modifying agent proxy logic** (`internal/agent/proxy/server.go`):
+**When modifying agent proxy logic** (`internal/core/agent/proxy.go`):
 - HTTP requests: `handleHTTPRequest()` method
 - HTTPS CONNECT: `handleConnect()` method
 - Request ID generation: `generateRequestID()`
 
-**When modifying agent tunnel client** (`internal/agent/tunnel/client.go`):
+**When modifying agent tunnel client** (`internal/core/agent/agent.go`):
 - Connection management: `Connect()`, `Disconnect()`, `handleResponses()`
 - Request/response handling: `SendRequest()`, channel-based response delivery
 - CONNECT protocol: `ConnectOpen()`, `ConnectSend()`, `ConnectClose()`, `ConnectDataChannel()`
 
-**When modifying server tunnel logic** (`internal/server/tunnel/server.go`):
+**When modifying server tunnel logic** (`internal/core/server/server.go`):
 - Connection handling: `handleConnection()`, TLS handshake verification
 - HTTP forwarding: `processRequest()`, `sendErrorResponse()`
 - CONNECT protocol: `handleConnectOpen()`, `handleConnectData()`, `handleConnectClose()`
@@ -257,7 +279,7 @@ The default `Makefile` is for reference only.
 **When modifying protocol**:
 - Update `internal/shared/protocol/protocol.go` with new message types
 - Add corresponding Envelope type handlers in both agent and server
-- Update both `tunnel/client.go` and `tunnel/server.go` simultaneously
+- Update both `agent.go` and `server.go` simultaneously
 
 ### Configuration Changes
 
@@ -282,24 +304,28 @@ The default `Makefile` is for reference only.
    - Visit HTTP and HTTPS sites
    - Check logs in both terminals for traffic flow
 
-### Debugging
+## Debugging
 
-**Native binaries with VS Code**:
+### Native Binaries with VS Code
+
 - Set breakpoints in `*.go` files
 - Use VS Code Go debugger with native binaries
 - Check `configs/*.local.yaml` for proper cert paths
 
-**Docker containers**:
+### Docker Containers
+
 - View logs: `docker logs -f fluidity-server` or `fluidity-agent`
 - Keep containers running: `./scripts/test-docker.ps1 -KeepContainers`
 - Exec into container: `docker exec -it fluidity-agent sh`
 
-**TLS issues**:
+### TLS Issues
+
 - Enable TLS debug logging (see comments in `cmd/*/main.go` about GODEBUG)
 - Verify cert dates: `openssl x509 -in certs/server.crt -noout -dates`
 - Check ServerName is set in client TLS config
 
-**Connection issues**:
+### Connection Issues
+
 - Agent can't connect: Check server is listening, firewall rules, cert paths
 - Proxy returns 502: Tunnel not established, check agent logs
 - Proxy returns 000: Agent not listening or server unreachable
@@ -307,6 +333,7 @@ The default `Makefile` is for reference only.
 ## Important Patterns
 
 ### Always Use Envelopes for Wire Protocol
+
 ```go
 // Sending
 env := protocol.Envelope{Type: "http_request", Payload: req}
@@ -319,15 +346,19 @@ decoder.Decode(&env)
 ```
 
 ### Request ID Tracking
+
 Every HTTP request gets a unique ID (`generateRequestID()`) used to correlate requests and responses across the tunnel.
 
 ### Graceful Shutdown
+
 Both agent and server use context cancellation and wait groups for clean shutdown on SIGINT/SIGTERM.
 
 ### Reconnection Logic
+
 Agent automatically reconnects if tunnel connection drops (see `cmd/agent/main.go` connection management goroutine).
 
 ### CONNECT Tunneling
+
 HTTPS uses HTTP CONNECT method with connection hijacking, then raw TCP pumping via `connect_data` messages.
 
 ## Dependencies
@@ -344,4 +375,14 @@ Standard library usage:
 
 ## Project Status
 
-Currently in **Phase 1 (alpha)**: Core infrastructure is complete and functional. Both HTTP and HTTPS tunneling are fully working. The system is ready for local development and Docker containerization, with production deployment pending.
+Currently in **Phase 2**: Core infrastructure is complete and functional. Both HTTP and HTTPS tunneling are fully working. Lambda control plane for lifecycle automation is in development. The system is ready for local development and Docker containerization, with production deployment pending.
+
+See [Development Plan](plan.md) for detailed roadmap.
+
+## Related Documentation
+
+- [Testing Guide](testing.md) - Unit and integration testing
+- [Architecture](architecture.md) - System design deep dive
+- [Certificate Management](certificate-management.md) - Certificate generation and AWS Secrets Manager integration
+- [Docker Deployment](docker.md) - Containerization details
+- [Deployment Guide](deployment.md) - All deployment options

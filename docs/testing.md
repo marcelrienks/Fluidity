@@ -115,6 +115,38 @@ coverage: 100.0% of statements
 **Coverage:** Full component interaction  
 **Execution:** ~3-10 seconds (parallel)
 
+### Test Organization
+
+```
+internal/integration/
+├── README.md                          # Test documentation
+├── testutil.go                        # Shared test utilities and helpers
+├── tunnel_test.go                     # Agent <-> Server tunnel integration
+├── http_proxy_test.go                 # HTTP proxy functionality
+├── connect_test.go                    # HTTPS CONNECT tunneling
+├── websocket_test.go                  # WebSocket tunneling
+└── circuitbreaker_integration_test.go # Circuit breaker integration
+```
+
+### Integration Test Approach
+
+1. **Start in-memory servers**: No external processes needed
+2. **Use real TLS certificates**: Tests with actual mTLS
+3. **Mock external HTTP calls**: Fast and reliable
+4. **Test component interactions**: Focus on integration points
+5. **Clean up resources**: Proper teardown in defer statements
+
+### Key Differences from E2E Tests
+
+| Aspect | Integration Tests | E2E Tests (scripts) |
+|--------|------------------|---------------------|
+| **Scope** | Component interactions | Full system deployment |
+| **Speed** | Fast (< 1s per test) | Slow (10-30s) |
+| **Dependencies** | In-memory only | Requires binaries/Docker |
+| **Network** | Mocked/local only | Real external services |
+| **Purpose** | Development feedback | Deployment validation |
+| **When to run** | Every commit | Before deploy/PR merge |
+
 ### What They Test
 
 **Tunnel Tests:**

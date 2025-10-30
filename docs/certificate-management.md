@@ -178,6 +178,8 @@ aws secretsmanager get-secret-value --secret-id fluidity/certificates
 
 ## Related Documentation
 
-- Phase 3 deployment: `docs/phase3-prerequisites.md`
-- AWS deployment: `docs/deployment.md`
-- Infrastructure: `docs/infrastructure.md`
+- Architecture: `docs/architecture.md`
+- Deployment guide: `docs/deployment.md`
+- Docker deployment: `docs/docker.md`
+- AWS Fargate: `docs/fargate.md`
+- Infrastructure as Code: `docs/infrastructure.md`
