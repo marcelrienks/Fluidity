@@ -39,11 +39,7 @@ make -f Makefile.<platform> run-agent-local   # Terminal 2
 curl -x http://127.0.0.1:8080 http://example.com
 ```
 
----
-
-## Documentation
-
-### Architecture
+## Architecture
 
 Fluidity uses a **client-server architecture** with mTLS authentication for secure tunneling through restrictive firewalls.
 
@@ -53,19 +49,16 @@ Fluidity uses a **client-server architecture** with mTLS authentication for secu
 - **Protocol**: Custom WebSocket-based with request/response IDs, connection pooling, auto-reconnection
 - **Security**: Mutual TLS with private CA certificates, no plaintext credentials
 
-**Deployment Options:**
-- Local development (both processes on same machine)
-- Docker containerized (~44MB Alpine images)
-- AWS Fargate (cloud-hosted server, local agent)
-- Lambda control plane (automated wake/sleep/kill lifecycle)
-
 **→ Full details:** [Architecture Documentation](docs/architecture.md)
 
----
+## Deployment
 
 ### Development
 
-Set up your local development environment to build, test, and contribute to Fluidity.
+Local development and testing options for building and contributing to Fluidity.
+
+#### **🏠 Local**
+Run both server and agent on your local machine.
 
 **Quick Setup:**
 ```bash
@@ -81,6 +74,27 @@ make -f Makefile.<platform> run-agent-local   # Terminal 2
 make -f Makefile.<platform> test
 ```
 
+**Best for:** Development, testing, debugging  
+**Cost:** Free
+
+#### **🐳 Docker**
+Build and run containerized images locally with Docker Desktop.
+
+**Commands:**
+```bash
+# Build images
+make -f Makefile.<platform> build-server
+make -f Makefile.<platform> build-agent
+
+# Run containers
+make -f Makefile.<platform> run-server
+make -f Makefile.<platform> run-agent
+```
+
+**Details:** Alpine Linux base, ~44MB per image, includes TLS certificates  
+**Best for:** Testing containerization before cloud deployment  
+**Cost:** Free
+
 **Project Structure:**
 - `cmd/` - Main entry points (server, agent, lambdas)
 - `internal/core/` - Server and agent business logic
@@ -89,63 +103,69 @@ make -f Makefile.<platform> test
 
 **Testing:** 75+ tests with ~77% coverage (unit, integration, E2E)
 
-**→ Full details:** [Development Guide](docs/development.md)
+**→ Full details:** [Development Guide](docs/development.md) | [Docker Guide](docs/docker.md)
 
----
+### Production (Recommended: CloudFormation)
+Deploy to AWS using **Infrastructure as Code** for automated, repeatable, cost-effective infrastructure.
 
-### Deployment
-
-Deploy Fluidity using one of five options, from local testing to full cloud infrastructure.
-
-**Option 1: Local** - Both server and agent on same machine (development/testing)  
-**Option 2: Docker** - Containerized with Docker Desktop  
-**Option 3: AWS Fargate (Manual)** - Cloud-hosted server, ~$0.50-3/month  
-**Option 4: CloudFormation** - Automated IaC deployment with monitoring  
-**Option 5: Lambda Control Plane** - Automated lifecycle (wake/sleep/kill)
-
-**Cost Comparison:**
-- Local: Free
-- Docker: Free (local)
-- Fargate: $0.50-3/month (24/7) or $0.10-0.20/month (on-demand with Lambda)
-- Lambda: ~$0.01/month (1000 invocations)
-
-**→ Full details:** [Deployment Guide](docs/deployment.md)
-
----
-
-### Docker
-
-Build and run Fluidity in containerized environments with Docker.
-
-**Build Commands:**
-```bash
-make -f Makefile.<platform> build-server
-make -f Makefile.<platform> build-agent
-```
-
-**Image Details:**
-- Base: Alpine Linux (minimal attack surface)
-- Size: ~44MB per image
-- Security: Non-root user, TLS certificates included
-- Networking: Host networking for Docker Desktop compatibility
-
-**Push to ECR:**
-```bash
-make -f Makefile.<platform> push-server
-make -f Makefile.<platform> push-agent
-```
-
-**→ Full details:** [Docker Guide](docs/docker.md)
-
----
-
-### AWS Fargate
-
-Deploy the server to AWS ECS Fargate for cloud-hosted tunneling.
+**Why CloudFormation:**
+- ✅ Single command deployment
+- ✅ Repeatable and version-controlled
+- ✅ Integrated monitoring and dashboards
+- ✅ Cost-optimized (~$0.11-0.21/month with Lambda control plane)
 
 **Quick Deploy:**
 ```bash
-# 1. Push to ECR
+./scripts/deploy-fluidity.sh fargate deploy  # Deploy server infrastructure
+./scripts/deploy-fluidity.sh lambda deploy   # Deploy control plane
+```
+
+#### **💻 Agent (Local)**
+The agent runs locally on your machine and connects to the cloud-hosted server.
+
+**Setup:**
+```bash
+# 1. Generate certificates (if not already done)
+./scripts/manage-certs.sh
+
+# 2. Configure agent
+# Edit configs/agent.yaml with Fargate server public IP
+
+# 3. Run agent
+make -f Makefile.<platform> run-agent-local
+```
+
+**Configuration:**
+- Connects to Fargate server via WebSocket over mTLS
+- Proxy port: 8080 (configurable)
+- Auto-reconnection with exponential backoff
+
+#### **☁️ Server (Fargate)**
+
+Serverless container platform running the Fluidity server without managing EC2 instances.
+
+**What's deployed:**
+- ECS cluster with Fargate launch type
+- Task definition (0.25 vCPU, 512 MB memory)
+- VPC, subnets, security groups
+- CloudWatch logs and monitoring
+- Public IP for agent connectivity
+
+**CloudFormation:**
+```bash
+# Deploy via script
+./scripts/deploy-fluidity.sh fargate deploy
+
+# Or use template directly
+aws cloudformation create-stack \
+  --stack-name fluidity-fargate \
+  --template-body file://deployments/cloudformation/fargate.yaml \
+  --parameters file://deployments/cloudformation/params.json
+```
+
+**Manual Deployment:**
+```bash
+# 1. Push image to ECR
 make -f Makefile.<platform> push-server
 
 # 2. Create task definition (AWS Console or CLI)
@@ -156,71 +176,85 @@ aws ecs update-service --cluster fluidity --service server --desired-count 1
 aws ecs describe-tasks --cluster fluidity --tasks <task-arn> | grep "publicIp"
 ```
 
-**Configuration:**
-- CPU: 256 (0.25 vCPU)
-- Memory: 512 MB
-- Networking: Public subnet with auto-assign public IP
-- Cost: ~$0.50-3/month
+**Cost:** $0.50-3/month (24/7) or $0.10-0.20/month (on-demand with Lambda)
 
-**→ Full details:** [AWS Fargate Guide](docs/fargate.md)
+**→ Details:** [Infrastructure Documentation](docs/infrastructure.md) | [AWS Fargate Guide](docs/fargate.md)
 
----
+#### **⚡ Control Plane (Lambda + API Gateway)**
 
-### Infrastructure as Code
+Automated lifecycle management to minimize costs with on-demand server operation.
 
-Automate infrastructure deployment using CloudFormation templates.
+**Components:**
+- **Wake Function** - Starts Fargate server (API Gateway endpoint)
+- **Sleep Function** - Auto-scales to 0 after idle (EventBridge scheduler, every 5 min)
+- **Kill Function** - Immediate shutdown (API Gateway endpoint)
+- **API Gateway** - HTTP endpoints for Wake/Kill functions
+- **EventBridge** - Scheduled Sleep automation
 
-**Deploy with Script:**
+**CloudFormation:**
 ```bash
-# Deploy Fargate stack
-./scripts/deploy-fluidity.sh fargate deploy
-
-# Deploy Lambda control plane
+# Deploy via script
 ./scripts/deploy-fluidity.sh lambda deploy
+
+# Or use template directly
+aws cloudformation create-stack \
+  --stack-name fluidity-lambda \
+  --template-body file://deployments/cloudformation/lambda.yaml \
+  --capabilities CAPABILITY_IAM
 ```
 
-**Templates Included:**
-- `fargate.yaml` - ECS cluster, task definitions, services, networking, monitoring
-- `lambda.yaml` - Wake/Sleep/Kill functions, API Gateway, EventBridge schedulers
+**API Usage:**
+```bash
+# Wake server (start on-demand)
+curl -X POST https://<api-id>.execute-api.us-east-1.amazonaws.com/prod/wake
 
-**Features:**
-- Parameterized configuration (custom VPC, subnets, security groups)
-- Stack protection against accidental deletion
-- CloudWatch dashboards and alarms
-- Drift detection and cost analysis
-
-**→ Full details:** [Infrastructure Documentation](docs/infrastructure.md)
-
----
-
-### Lambda Control Plane
-
-Automate server lifecycle management to minimize costs with on-demand infrastructure.
-
-**Functions:**
-- **Wake** - Starts Fargate server (via API Gateway or scheduled)
-- **Sleep** - Auto-scales to 0 after idle timeout (EventBridge every 5 min)
-- **Kill** - Immediate shutdown (manual via API Gateway)
+# Kill server (immediate shutdown)
+curl -X POST https://<api-id>.execute-api.us-east-1.amazonaws.com/prod/kill
+```
 
 **Cost Optimization:**
 - Fargate: $0.50-3/month (24/7) → $0.10-0.20/month (on-demand)
 - Lambda: ~$0.01/month (1000 invocations)
-- Total savings: ~90% for occasional use
+- **Total: ~$0.11-0.21/month** (90% savings for occasional use)
 
-**Endpoints:**
+**→ Details:** [Infrastructure Documentation](docs/infrastructure.md) | [Lambda Functions Guide](docs/lambda.md)
+
+#### **🔐 Certificates**
+
+mTLS certificates for secure authentication between agent and server.
+
+**Generate Certificates:**
 ```bash
-# Wake server
-curl -X POST https://<api-id>.execute-api.us-east-1.amazonaws.com/prod/wake
-
-# Kill server
-curl -X POST https://<api-id>.execute-api.us-east-1.amazonaws.com/prod/kill
+./scripts/manage-certs.sh              # Local files only
+./scripts/manage-certs.sh --upload     # Upload to AWS Secrets Manager
 ```
 
-**→ Full details:** [Lambda Functions Guide](docs/lambda.md)
+**For Production (AWS):**
+1. Generate certificates with `--upload` flag
+2. CloudFormation automatically configures Fargate to use Secrets Manager
+3. Agent uses local certificate files
 
----
+**Local Files (./certs/):**
+- `ca.crt`, `ca.key` - CA certificate and key
+- `server.crt`, `server.key` - Server certificate
+- `client.crt`, `client.key` - Client certificate
 
-### Operations
+**AWS Secrets Manager:**
+- Secret name: `fluidity/certificates`
+- Contains Base64-encoded `cert_pem`, `key_pem`, `ca_pem`
+
+**Certificate Rotation:**
+1. Generate new certificates with `--upload`
+2. Restart Fargate server (task pulls latest from Secrets Manager)
+3. Restart local agent with new client certificates
+
+**Security:** Private CA, 2048-bit RSA, SHA-256
+
+**→ Full details:** [Certificate Guide](docs/certificate.md)
+
+**→ Full deployment details:** [Deployment Guide](docs/deployment.md)
+
+## Operations
 
 Daily operations, monitoring, troubleshooting, and maintenance procedures for production environments.
 
@@ -241,36 +275,7 @@ aws logs tail /ecs/fluidity-server --follow
 
 **→ Full details:** [Operational Runbook](docs/runbook.md)
 
----
-
-### Certificate Management
-
-Generate and manage mTLS certificates for Fluidity authentication.
-
-**Generate Certificates:**
-```bash
-./scripts/manage-certs.sh  # macOS/Linux
-.\scripts\manage-certs.ps1  # Windows
-```
-
-**Upload to AWS Secrets Manager:**
-```bash
-./scripts/manage-certs.sh --upload
-```
-
-**Certificate Rotation:**
-1. Generate new certificates
-2. Upload to Secrets Manager
-3. Restart server and agent
-4. Verify connectivity
-
-**Security:** Private CA, 2048-bit RSA, 365-day validity, SHA-256
-
-**→ Full details:** [Certificate Management Guide](docs/certificate-management.md)
-
----
-
-### Testing
+## Testing
 
 Three-tier testing strategy ensuring code quality and reliability.
 
@@ -295,9 +300,7 @@ go test -v ./internal/core/agent/...
 
 **→ Full details:** [Testing Guide](docs/testing.md)
 
----
-
-### Product Requirements
+## Product Requirements
 
 Feature specifications, user stories, and success metrics for Fluidity.
 
@@ -318,9 +321,7 @@ Feature specifications, user stories, and success metrics for Fluidity.
 
 **→ Full details:** [Product Requirements](docs/product.md)
 
----
-
-### Development Roadmap
+## Development Roadmap
 
 Project status and implementation roadmap by phase.
 
@@ -341,8 +342,6 @@ Project status and implementation roadmap by phase.
 - Production monitoring improvements
 
 **→ Full details:** [Development Plan](docs/plan.md)
-
----
 
 ## Disclaimer
 
