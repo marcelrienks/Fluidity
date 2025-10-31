@@ -8,33 +8,96 @@ set -euo pipefail
 #   ./deploy-fluidity.sh [OPTIONS]
 #
 # Options:
-#   -e, --environment ENV      Environment to deploy to: dev or prod (default: dev)
 #   -a, --action ACTION        Action to perform: deploy, delete, status, outputs (default: deploy)
-#   -s, --stack-name NAME      CloudFormation stack name (default: fluidity-{environment})
-#   -p, --parameters FILE      Parameters JSON file (default: params-{environment}.json)
+#   -s, --stack-name NAME      CloudFormation stack name (default: fluidity)
 #   -f, --force                Skip confirmation prompts
 #   -h, --help                 Show this help message
 #
+# Required Parameters:
+#   --account-id ID            [OPTIONAL if AWS CLI configured] AWS Account ID (12 digits)
+#                              Auto-detected from AWS credentials if not provided
+#                              Get: aws sts get-caller-identity --query Account --output text
+#   --region REGION            [REQUIRED] AWS Region (e.g., us-east-1)
+#   --vpc-id VPC               [REQUIRED] VPC ID
+#                              Get: aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text
+#   --public-subnets SUBNETS   [REQUIRED] Comma-separated list of public subnet IDs (minimum 2)
+#                              Get: aws ec2 describe-subnets --filters Name=vpc-id,Values=<VPC_ID> --query 'Subnets[*].SubnetId' --output text | tr '\t' ','
+#   --allowed-cidr CIDR        [REQUIRED] Allowed ingress CIDR (e.g., 1.2.3.4/32)
+#                              Get: curl -s https://ifconfig.me && echo '/32'
+#
+# Optional Parameters (with defaults):
+#   --container-image IMAGE    Container image URI (default: <account-id>.dkr.ecr.<region>.amazonaws.com/fluidity-server:latest)
+#   --cluster-name NAME        ECS cluster name (default: fluidity)
+#   --service-name NAME        ECS service name (default: fluidity-server)
+#   --container-port PORT      Container port (default: 8443)
+#   --cpu CPU                  CPU units - 256=0.25vCPU, 512=0.5vCPU, 1024=1vCPU (default: 256)
+#   --memory MEMORY            Memory in MB (default: 512)
+#   --desired-count COUNT      Initial desired task count, 0=stopped (default: 0)
+#
 # Examples:
-#   ./deploy-fluidity.sh -e prod -a deploy
-#   ./deploy-fluidity.sh -e dev -a status
-#   ./deploy-fluidity.sh -e dev -a delete -f
+#   # Deploy with required parameters (Account ID auto-detected)
+#   ./deploy-fluidity.sh -a deploy --region us-east-1 --vpc-id vpc-abc123 --public-subnets subnet-1,subnet-2 --allowed-cidr 1.2.3.4/32
+#
+#   # Quick deploy using AWS CLI to gather values
+#   VPC_ID=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text)
+#   SUBNETS=$(aws ec2 describe-subnets --filters Name=vpc-id,Values=$VPC_ID --query 'Subnets[*].SubnetId' --output text | tr '\t' ',')
+#   MY_IP=$(curl -s ifconfig.me)/32
+#   ./deploy-fluidity.sh -a deploy --region us-east-1 --vpc-id $VPC_ID --public-subnets $SUBNETS --allowed-cidr $MY_IP
+#
+#   # Deploy with custom optional parameters
+#   ./deploy-fluidity.sh -a deploy --region us-east-1 --vpc-id vpc-abc123 --public-subnets subnet-1,subnet-2 --allowed-cidr 1.2.3.4/32 --cpu 512 --memory 1024 --desired-count 1
+#
+#   # Check stack status
+#   ./deploy-fluidity.sh -a status
+#
+#   # Delete stack
+#   ./deploy-fluidity.sh -a delete -f
 #
 
 # Default values
-ENVIRONMENT="${ENVIRONMENT:-dev}"
 ACTION="${ACTION:-deploy}"
+STACK_NAME="${STACK_NAME:-fluidity}"
 FORCE=false
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CLOUDFORMATION_DIR="$(dirname "$SCRIPT_DIR")/cloudformation"
+CLOUDFORMATION_DIR="$(dirname "$SCRIPT_DIR")/deployments/cloudformation"
+
+# AWS Configuration
+ACCOUNT_ID=""
+REGION=""
+VPC_ID=""
+PUBLIC_SUBNETS=""
+ALLOWED_CIDR=""
+
+# Container Configuration
+CONTAINER_IMAGE=""
+CLUSTER_NAME="fluidity"
+SERVICE_NAME="fluidity-server"
+CONTAINER_PORT="8443"
+CPU="256"
+MEMORY="512"
+DESIRED_COUNT="0"
+
+# Logging Configuration
+LOG_GROUP_NAME="/ecs/fluidity/server"
+LOG_RETENTION_DAYS="30"
+
+# Lambda Configuration
+IDLE_THRESHOLD_MINUTES="15"
+LOOKBACK_PERIOD_MINUTES="10"
+SLEEP_CHECK_INTERVAL_MINUTES="5"
+DAILY_KILL_TIME="cron(0 23 * * ? *)"
+WAKE_LAMBDA_TIMEOUT="30"
+SLEEP_LAMBDA_TIMEOUT="60"
+KILL_LAMBDA_TIMEOUT="30"
+
+# API Gateway Configuration
+API_THROTTLE_BURST_LIMIT="20"
+API_THROTTLE_RATE_LIMIT="3"
+API_QUOTA_LIMIT="300"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -e|--environment)
-            ENVIRONMENT="$2"
-            shift 2
-            ;;
         -a|--action)
             ACTION="$2"
             shift 2
@@ -51,8 +114,56 @@ while [[ $# -gt 0 ]]; do
             FORCE=true
             shift
             ;;
+        --account-id)
+            ACCOUNT_ID="$2"
+            shift 2
+            ;;
+        --region)
+            REGION="$2"
+            shift 2
+            ;;
+        --vpc-id)
+            VPC_ID="$2"
+            shift 2
+            ;;
+        --public-subnets)
+            PUBLIC_SUBNETS="$2"
+            shift 2
+            ;;
+        --allowed-cidr)
+            ALLOWED_CIDR="$2"
+            shift 2
+            ;;
+        --container-image)
+            CONTAINER_IMAGE="$2"
+            shift 2
+            ;;
+        --cluster-name)
+            CLUSTER_NAME="$2"
+            shift 2
+            ;;
+        --service-name)
+            SERVICE_NAME="$2"
+            shift 2
+            ;;
+        --container-port)
+            CONTAINER_PORT="$2"
+            shift 2
+            ;;
+        --cpu)
+            CPU="$2"
+            shift 2
+            ;;
+        --memory)
+            MEMORY="$2"
+            shift 2
+            ;;
+        --desired-count)
+            DESIRED_COUNT="$2"
+            shift 2
+            ;;
         -h|--help)
-            grep '^#' "$0" | tail -n +3
+            grep '^#' "$0" | tail -n +3 | head -n -1
             exit 0
             ;;
         *)
@@ -62,34 +173,269 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Validate environment
-if [[ ! "$ENVIRONMENT" =~ ^(dev|prod)$ ]]; then
-    echo "Error: Environment must be 'dev' or 'prod'"
-    exit 1
-fi
-
 # Validate action
 if [[ ! "$ACTION" =~ ^(deploy|delete|status|outputs)$ ]]; then
     echo "Error: Action must be 'deploy', 'delete', 'status', or 'outputs'"
     exit 1
 fi
 
-# Set defaults based on environment
-STACK_NAME="${STACK_NAME:-fluidity-$ENVIRONMENT}"
+# Set defaults
 FARGATE_STACK_NAME="${STACK_NAME}-fargate"
 LAMBDA_STACK_NAME="${STACK_NAME}-lambda"
-PARAMETERS_FILE="${PARAMETERS_FILE:-$CLOUDFORMATION_DIR/params-$ENVIRONMENT.json}"
 FARGATE_TEMPLATE="$CLOUDFORMATION_DIR/fargate.yaml"
 LAMBDA_TEMPLATE="$CLOUDFORMATION_DIR/lambda.yaml"
 STACK_POLICY="$CLOUDFORMATION_DIR/stack-policy.json"
 CAPABILITIES="CAPABILITY_NAMED_IAM"
 
-# Validate prerequisites
-if [[ ! -f "$PARAMETERS_FILE" ]]; then
-    echo "Error: Parameters file not found: $PARAMETERS_FILE"
+# Check if AWS CLI is installed and configured
+echo "Checking AWS CLI configuration..."
+
+AWS_CONFIGURED=false
+if command -v aws &> /dev/null; then
+    CALLER_IDENTITY=$(aws sts get-caller-identity 2>&1)
+    if [[ $? -eq 0 ]]; then
+        AWS_CONFIGURED=true
+        CALLER_ACCOUNT=$(echo "$CALLER_IDENTITY" | jq -r '.Account')
+        CALLER_ARN=$(echo "$CALLER_IDENTITY" | jq -r '.Arn')
+        echo "[OK] AWS CLI is configured"
+        echo "  Account: $CALLER_ACCOUNT"
+        echo "  User: $CALLER_ARN"
+        
+        # Auto-populate ACCOUNT_ID if not provided
+        if [[ -z "$ACCOUNT_ID" ]]; then
+            ACCOUNT_ID="$CALLER_ACCOUNT"
+            echo "[OK] Using Account ID from AWS credentials: $ACCOUNT_ID"
+        fi
+    fi
+fi
+
+if [[ "$AWS_CONFIGURED" == false ]]; then
     echo ""
-    echo "Edit the file and update YOUR_* placeholders with actual values."
+    echo "[ERROR] AWS CLI is not configured"
+    echo ""
+    echo "The AWS CLI needs to be configured with your credentials before running this script."
+    
+    echo ""
+    echo "To configure AWS CLI:"
+    echo "  1. Run: aws configure"
+    echo "  2. Enter your AWS Access Key ID"
+    echo "  3. Enter your AWS Secret Access Key"
+    echo "  4. Enter your default region (e.g., us-east-1)"
+    echo "  5. Enter default output format: json"
+    
+    echo ""
+    echo "To get AWS credentials:"
+    echo "  1. Log in to AWS Console: https://console.aws.amazon.com"
+    echo "  2. Go to: IAM > Users > [Your User] > Security Credentials"
+    echo "  3. Create Access Key > CLI"
+    echo "  4. Copy the Access Key ID and Secret Access Key"
+    
+    echo ""
+    echo "After configuring AWS CLI, run this script again."
+    echo ""
     exit 1
+fi
+
+# Auto-gather missing required parameters from AWS
+echo "Checking required parameters..."
+
+USE_CMDLINE_PARAMS=true
+GATHERED_PARAMS=()
+
+# Try to auto-detect Region from AWS CLI default configuration if not provided
+if [[ -z "$REGION" ]]; then
+    echo "Region not provided, attempting to auto-detect..."
+    REGION=$(aws configure get region 2>&1)
+    if [[ $? -eq 0 ]] && [[ -n "$REGION" ]]; then
+        GATHERED_PARAMS+=("Region")
+        echo "[OK] Auto-detected Region: $REGION"
+    else
+        REGION=""
+    fi
+fi
+
+# Try to auto-detect VpcId from default VPC if not provided
+if [[ -z "$VPC_ID" ]] && [[ -n "$REGION" ]]; then
+    echo "VpcId not provided, attempting to auto-detect default VPC..."
+    VPC_ID=$(aws ec2 describe-vpcs --region "$REGION" --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text 2>&1)
+    if [[ $? -eq 0 ]] && [[ -n "$VPC_ID" ]] && [[ "$VPC_ID" != "None" ]]; then
+        GATHERED_PARAMS+=("VpcId")
+        echo "[OK] Auto-detected VpcId: $VPC_ID"
+    else
+        VPC_ID=""
+    fi
+fi
+
+# Try to auto-detect PublicSubnets from VPC if not provided
+if [[ -z "$PUBLIC_SUBNETS" ]] && [[ -n "$VPC_ID" ]] && [[ -n "$REGION" ]]; then
+    echo "PublicSubnets not provided, attempting to auto-detect from VPC..."
+    SUBNET_LIST=$(aws ec2 describe-subnets --region "$REGION" --filters Name=vpc-id,Values="$VPC_ID" Name=map-public-ip-on-launch,Values=true --query 'Subnets[*].SubnetId' --output text 2>&1)
+    if [[ $? -eq 0 ]] && [[ -n "$SUBNET_LIST" ]]; then
+        PUBLIC_SUBNETS=$(echo "$SUBNET_LIST" | tr '\t' ',')
+        if [[ -n "$PUBLIC_SUBNETS" ]]; then
+            GATHERED_PARAMS+=("PublicSubnets")
+            echo "[OK] Auto-detected PublicSubnets: $PUBLIC_SUBNETS"
+        else
+            PUBLIC_SUBNETS=""
+        fi
+    else
+        PUBLIC_SUBNETS=""
+    fi
+fi
+
+# Try to auto-detect public IP for AllowedIngressCidr if not provided
+if [[ -z "$ALLOWED_CIDR" ]]; then
+    echo "AllowedIngressCidr not provided, attempting to auto-detect public IP..."
+    PUBLIC_IP=""
+    
+    # Try multiple IP services for reliability
+    IP_SERVICES=(
+        "https://api.ipify.org"
+        "https://ifconfig.me/ip"
+        "https://icanhazip.com"
+    )
+    
+    for service in "${IP_SERVICES[@]}"; do
+        PUBLIC_IP=$(curl -s --max-time 10 "$service" 2>/dev/null | tr -d '[:space:]')
+        if [[ "$PUBLIC_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+            break
+        fi
+        PUBLIC_IP=""
+    done
+    
+    if [[ -n "$PUBLIC_IP" ]] && [[ "$PUBLIC_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+        ALLOWED_CIDR="$PUBLIC_IP/32"
+        GATHERED_PARAMS+=("AllowedIngressCidr")
+        echo "[OK] Auto-detected AllowedIngressCidr: $ALLOWED_CIDR"
+    else
+        ALLOWED_CIDR=""
+    fi
+fi
+
+if [[ ${#GATHERED_PARAMS[@]} -gt 0 ]]; then
+    echo ""
+    echo "Auto-gathered parameters: ${GATHERED_PARAMS[*]}"
+fi
+
+# Validate all required parameters are now available
+MISSING_PARAMS=()
+[[ -z "$REGION" ]] && MISSING_PARAMS+=("--region")
+[[ -z "$VPC_ID" ]] && MISSING_PARAMS+=("--vpc-id")
+[[ -z "$PUBLIC_SUBNETS" ]] && MISSING_PARAMS+=("--public-subnets")
+[[ -z "$ALLOWED_CIDR" ]] && MISSING_PARAMS+=("--allowed-cidr")
+
+if [[ ${#MISSING_PARAMS[@]} -gt 0 ]]; then
+    echo ""
+    echo "[ERROR] Missing required parameters:"
+    for param in "${MISSING_PARAMS[@]}"; do
+        echo "  - $param"
+    done
+    
+    echo ""
+    echo "Unable to auto-detect all required parameters."
+    echo "Please provide these parameters as command-line arguments:"
+    echo "  --region          : Your AWS region (e.g., us-east-1, eu-west-1)"
+    echo "  --vpc-id          : aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text"
+    echo "  --public-subnets  : aws ec2 describe-subnets --filters Name=vpc-id,Values=<VPC_ID> --query 'Subnets[*].SubnetId' --output text | tr '\t' ','"
+    echo "  --allowed-cidr    : Your public IP with /32 CIDR (e.g., 1.2.3.4/32)"
+    
+    echo ""
+    echo "Example usage:"
+    echo "  ./deploy-fluidity.sh -a deploy --region us-east-1 --vpc-id vpc-abc123 --public-subnets subnet-1,subnet-2 --allowed-cidr 1.2.3.4/32"
+    echo ""
+    echo "Note: Account ID is automatically detected from your AWS credentials"
+    
+    echo ""
+    echo "For detailed help: ./deploy-fluidity.sh --help"
+    echo ""
+    exit 1
+fi
+
+# Set ContainerImage default if not provided
+if [[ -z "$CONTAINER_IMAGE" ]]; then
+    CONTAINER_IMAGE="$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/fluidity-server:latest"
+fi
+
+echo "[OK] All required parameters validated successfully"
+
+# Load TLS certificates for CloudFormation
+echo "Loading TLS certificates..."
+
+CERTS_DIR="$(dirname "$SCRIPT_DIR")/certs"
+SERVER_CERT_PATH="$CERTS_DIR/server.crt"
+SERVER_KEY_PATH="$CERTS_DIR/server.key"
+CA_CERT_PATH="$CERTS_DIR/ca.crt"
+
+if [[ ! -f "$SERVER_CERT_PATH" ]]; then
+    echo "[ERROR] Server certificate not found: $SERVER_CERT_PATH"
+    echo "Run the certificate generation script first:"
+    echo "  ./scripts/manage-certs.sh"
+    exit 1
+fi
+
+if [[ ! -f "$SERVER_KEY_PATH" ]]; then
+    echo "[ERROR] Server key not found: $SERVER_KEY_PATH"
+    exit 1
+fi
+
+if [[ ! -f "$CA_CERT_PATH" ]]; then
+    echo "[ERROR] CA certificate not found: $CA_CERT_PATH"
+    exit 1
+fi
+
+# Read certificate files as plain text (CloudFormation will handle storage in Secrets Manager)
+CERT_PEM=$(cat "$SERVER_CERT_PATH" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+KEY_PEM=$(cat "$SERVER_KEY_PATH" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+CA_PEM=$(cat "$CA_CERT_PATH" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+echo "[OK] Certificates loaded"
+
+# Skip the parameters file logic since we're using command-line/auto-detected params
+if false; then
+    # Use parameters file
+    PARAMETERS_FILE="${PARAMETERS_FILE:-$CLOUDFORMATION_DIR/params.json}"
+    
+    if [[ ! -f "$PARAMETERS_FILE" ]]; then
+        echo "Error: Parameters file not found: $PARAMETERS_FILE"
+        echo ""
+        echo "Either provide command-line parameters or create the parameters file."
+        exit 1
+    fi
+    
+    # Validate parameters file has been configured
+    echo "Validating parameters file..."
+    PARAMS_CONTENT=$(cat "$PARAMETERS_FILE")
+    PLACEHOLDERS=$(echo "$PARAMS_CONTENT" | grep -oE '<[A-Z_]+>' | sort -u || true)
+    
+    if [[ -n "$PLACEHOLDERS" ]]; then
+        echo ""
+        echo "[ERROR] Parameters file contains unconfigured placeholders"
+        echo ""
+        echo "Found placeholders in $PARAMETERS_FILE :"
+        
+        echo "$PLACEHOLDERS" | while IFS= read -r placeholder; do
+            echo "  - $placeholder"
+        done
+        
+        echo ""
+        echo "The params.json file is for reference only. You must provide parameters via command-line arguments:"
+        echo "  ./deploy-fluidity.sh -a deploy --account-id <id> --region <region> --vpc-id <vpc> --public-subnets <subnet1,subnet2> --allowed-cidr <ip>/32"
+        
+        echo ""
+        echo "How to get required parameter values:"
+        echo "  --account-id      : aws sts get-caller-identity --query Account --output text"
+        echo "  --region          : Your AWS region (e.g., us-east-1, eu-west-1)"
+        echo "  --vpc-id          : aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text"
+        echo "  --public-subnets  : aws ec2 describe-subnets --filters Name=vpc-id,Values=<VPC_ID> --query 'Subnets[*].SubnetId' --output text | tr '\t' ','"
+        echo "  --allowed-cidr    : curl -s https://ifconfig.me && echo '/32'"
+        
+        echo ""
+        echo "For detailed help: ./deploy-fluidity.sh --help"
+        echo ""
+        exit 1
+    fi
+    
+    echo "[OK] Parameters file validated successfully"
 fi
 
 if [[ ! -f "$FARGATE_TEMPLATE" ]]; then
@@ -114,100 +460,113 @@ get_stack_status() {
 deploy_stack() {
     local stack_name="$1"
     local template="$2"
+    local stack_type="$3"  # 'fargate' or 'lambda'
     
     echo ""
     echo "=== Deploying $stack_name ==="
     
-    # Check if this is the Fargate stack and certificates are needed
-    local cert_params=""
-    if [[ "$stack_name" == *"fargate"* ]]; then
-        local certs_dir="$(dirname "$SCRIPT_DIR")/certs"
-        
-        if [[ ! -f "$certs_dir/server.crt" ]] || [[ ! -f "$certs_dir/server.key" ]] || [[ ! -f "$certs_dir/ca.crt" ]]; then
-            echo "Error: Certificates not found in $certs_dir"
-            echo "Run './scripts/manage-certs.sh' first to generate certificates"
-            exit 1
-        fi
-        
-        echo "Reading certificates from $certs_dir..."
-        local cert_pem=$(base64 -i "$certs_dir/server.crt" | tr -d '\n')
-        local key_pem=$(base64 -i "$certs_dir/server.key" | tr -d '\n')
-        local ca_pem=$(base64 -i "$certs_dir/ca.crt" | tr -d '\n')
-        
-        cert_params="ParameterKey=CertPem,ParameterValue=$cert_pem ParameterKey=KeyPem,ParameterValue=$key_pem ParameterKey=CaPem,ParameterValue=$ca_pem"
-    fi
-    
     local status
     status=$(get_stack_status "$stack_name")
+    
+    # Build parameters based on stack type
+    local params_file=""
+    local params_arg=""
+    
+    if [[ "$stack_type" == "fargate" ]]; then
+        # Create parameters JSON file for certificates (too large for command-line)
+        params_file="/tmp/fluidity-fargate-params-$$.json"
+        
+        cat > "$params_file" << EOF
+[
+  {"ParameterKey": "ClusterName", "ParameterValue": "$CLUSTER_NAME"},
+  {"ParameterKey": "ServiceName", "ParameterValue": "$SERVICE_NAME"},
+  {"ParameterKey": "ContainerImage", "ParameterValue": "$CONTAINER_IMAGE"},
+  {"ParameterKey": "ContainerPort", "ParameterValue": "$CONTAINER_PORT"},
+  {"ParameterKey": "Cpu", "ParameterValue": "$CPU"},
+  {"ParameterKey": "Memory", "ParameterValue": "$MEMORY"},
+  {"ParameterKey": "DesiredCount", "ParameterValue": "$DESIRED_COUNT"},
+  {"ParameterKey": "VpcId", "ParameterValue": "$VPC_ID"},
+  {"ParameterKey": "PublicSubnets", "ParameterValue": "$PUBLIC_SUBNETS"},
+  {"ParameterKey": "AllowedIngressCidr", "ParameterValue": "$ALLOWED_CIDR"},
+  {"ParameterKey": "AssignPublicIp", "ParameterValue": "ENABLED"},
+  {"ParameterKey": "LogGroupName", "ParameterValue": "$LOG_GROUP_NAME"},
+  {"ParameterKey": "LogRetentionDays", "ParameterValue": "$LOG_RETENTION_DAYS"},
+  {"ParameterKey": "CertPem", "ParameterValue": $(echo "$CERT_PEM" | jq -Rs .)},
+  {"ParameterKey": "KeyPem", "ParameterValue": $(echo "$KEY_PEM" | jq -Rs .)},
+  {"ParameterKey": "CaPem", "ParameterValue": $(echo "$CA_PEM" | jq -Rs .)}
+]
+EOF
+        params_arg="file://$params_file"
+    elif [[ "$stack_type" == "lambda" ]]; then
+        # Lambda stack parameters (command-line is fine, no large values)
+        params_arg="ParameterKey=ECSClusterName,ParameterValue=$CLUSTER_NAME \
+ParameterKey=ECSServiceName,ParameterValue=$SERVICE_NAME \
+ParameterKey=IdleThresholdMinutes,ParameterValue=$IDLE_THRESHOLD_MINUTES \
+ParameterKey=LookbackPeriodMinutes,ParameterValue=$LOOKBACK_PERIOD_MINUTES \
+ParameterKey=SleepCheckIntervalMinutes,ParameterValue=$SLEEP_CHECK_INTERVAL_MINUTES \
+ParameterKey=DailyKillTime,ParameterValue=$DAILY_KILL_TIME \
+ParameterKey=WakeLambdaTimeout,ParameterValue=$WAKE_LAMBDA_TIMEOUT \
+ParameterKey=SleepLambdaTimeout,ParameterValue=$SLEEP_LAMBDA_TIMEOUT \
+ParameterKey=KillLambdaTimeout,ParameterValue=$KILL_LAMBDA_TIMEOUT \
+ParameterKey=APIThrottleBurstLimit,ParameterValue=$API_THROTTLE_BURST_LIMIT \
+ParameterKey=APIThrottleRateLimit,ParameterValue=$API_THROTTLE_RATE_LIMIT \
+ParameterKey=APIQuotaLimit,ParameterValue=$API_QUOTA_LIMIT"
+    fi
     
     if [[ "$status" == "DOES_NOT_EXIST" ]]; then
         echo "Creating new stack: $stack_name"
         
-        if [[ -n "$cert_params" ]]; then
-            # Deploy with certificate parameters
-            aws cloudformation create-stack \
-                --stack-name "$stack_name" \
-                --template-body "file://$template" \
-                --parameters "file://$PARAMETERS_FILE" $cert_params \
-                --capabilities "$CAPABILITIES" \
-                --tags \
-                    "Key=Environment,Value=$ENVIRONMENT" \
-                    "Key=Application,Value=Fluidity" \
-                    "Key=ManagedBy,Value=CloudFormation" \
-                --output text
-        else
-            # Deploy without certificate parameters
-            aws cloudformation create-stack \
-                --stack-name "$stack_name" \
-                --template-body "file://$template" \
-                --parameters "file://$PARAMETERS_FILE" \
-                --capabilities "$CAPABILITIES" \
-                --tags \
-                    "Key=Environment,Value=$ENVIRONMENT" \
-                    "Key=Application,Value=Fluidity" \
-                    "Key=ManagedBy,Value=CloudFormation" \
-                --output text
-        fi
+        aws cloudformation create-stack \
+            --stack-name "$stack_name" \
+            --template-body "file://$template" \
+            --parameters $params_arg \
+            --capabilities "$CAPABILITIES" \
+            --region "$REGION" \
+            --tags \
+                "Key=Application,Value=Fluidity" \
+                "Key=ManagedBy,Value=CloudFormation" \
+            --output text
         
         echo "Waiting for stack creation..."
-        aws cloudformation wait stack-create-complete --stack-name "$stack_name"
-        echo "✓ Stack created successfully"
+        aws cloudformation wait stack-create-complete --stack-name "$stack_name" --region "$REGION"
+        
+        # Clean up temp file if Fargate
+        if [[ -n "$params_file" ]] && [[ -f "$params_file" ]]; then
+            rm -f "$params_file"
+        fi
+        
+        echo "[OK] Stack created successfully"
     else
         echo "Updating existing stack: $stack_name (Current status: $status)"
         
         local update_output
-        if [[ -n "$cert_params" ]]; then
-            # Update with certificate parameters
-            update_output=$(aws cloudformation update-stack \
-                --stack-name "$stack_name" \
-                --template-body "file://$template" \
-                --parameters "file://$PARAMETERS_FILE" $cert_params \
-                --capabilities "$CAPABILITIES" \
-                --tags \
-                    "Key=Environment,Value=$ENVIRONMENT" \
-                    "Key=Application,Value=Fluidity" \
-                    "Key=ManagedBy,Value=CloudFormation" \
-                --output text 2>&1 || true)
-        else
-            # Update without certificate parameters
-            update_output=$(aws cloudformation update-stack \
-                --stack-name "$stack_name" \
-                --template-body "file://$template" \
-                --parameters "file://$PARAMETERS_FILE" \
-                --capabilities "$CAPABILITIES" \
-                --tags \
-                    "Key=Environment,Value=$ENVIRONMENT" \
-                    "Key=Application,Value=Fluidity" \
-                    "Key=ManagedBy,Value=CloudFormation" \
-                --output text 2>&1 || true)
-        fi
+        update_output=$(aws cloudformation update-stack \
+            --stack-name "$stack_name" \
+            --template-body "file://$template" \
+            --parameters $params_arg \
+            --capabilities "$CAPABILITIES" \
+            --region "$REGION" \
+            --tags \
+                "Key=Application,Value=Fluidity" \
+                "Key=ManagedBy,Value=CloudFormation" \
+            --output text 2>&1 || true)
         
         if echo "$update_output" | grep -q "No updates are to be performed"; then
-            echo "✓ Stack is already up to date (no changes)"
+            # Clean up temp file
+            if [[ -n "$params_file" ]] && [[ -f "$params_file" ]]; then
+                rm -f "$params_file"
+            fi
+            echo "[OK] Stack is already up to date (no changes)"
         else
             echo "Waiting for stack update..."
-            aws cloudformation wait stack-update-complete --stack-name "$stack_name"
-            echo "✓ Stack updated successfully"
+            aws cloudformation wait stack-update-complete --stack-name "$stack_name" --region "$REGION"
+            
+            # Clean up temp file
+            if [[ -n "$params_file" ]] && [[ -f "$params_file" ]]; then
+                rm -f "$params_file"
+            fi
+            
+            echo "[OK] Stack updated successfully"
         fi
     fi
 }
@@ -261,9 +620,9 @@ get_stack_drift_status() {
             --output text)
         
         if [[ "$drift" == "DRIFTED" ]]; then
-            echo "⚠ DRIFTED: Stack has manual changes"
+            echo "[WARNING] DRIFTED: Stack has manual changes"
         elif [[ "$drift" == "IN_SYNC" ]]; then
-            echo "✓ IN_SYNC: Stack matches template"
+            echo "[OK] IN_SYNC: Stack matches template"
         else
             echo "Status: $drift"
         fi
@@ -275,15 +634,15 @@ get_stack_drift_status() {
 # Main execution
 case "$ACTION" in
     deploy)
-        deploy_stack "$FARGATE_STACK_NAME" "$FARGATE_TEMPLATE"
-        deploy_stack "$LAMBDA_STACK_NAME" "$LAMBDA_TEMPLATE"
+        deploy_stack "$FARGATE_STACK_NAME" "$FARGATE_TEMPLATE" "fargate"
+        deploy_stack "$LAMBDA_STACK_NAME" "$LAMBDA_TEMPLATE" "lambda"
         
         echo ""
         echo "=== Applying Stack Policy ==="
         aws cloudformation set-stack-policy \
             --stack-name "$FARGATE_STACK_NAME" \
             --stack-policy-body "file://$STACK_POLICY"
-        echo "✓ Stack policy applied"
+        echo "[OK] Stack policy applied"
         
         get_stack_outputs "$FARGATE_STACK_NAME"
         get_stack_outputs "$LAMBDA_STACK_NAME"
@@ -311,7 +670,7 @@ case "$ACTION" in
         echo "Waiting for stacks to be deleted..."
         aws cloudformation wait stack-delete-complete --stack-name "$FARGATE_STACK_NAME"
         aws cloudformation wait stack-delete-complete --stack-name "$LAMBDA_STACK_NAME"
-        echo "✓ Stacks deleted"
+        echo "[OK] Stacks deleted"
         ;;
     status)
         echo ""
@@ -336,4 +695,4 @@ case "$ACTION" in
 esac
 
 echo ""
-echo "✓ Operation completed successfully"
+echo "[OK] Operation completed successfully"

@@ -1,43 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: |
-  Fluidity - AWS Fargate (ECS) deployment for tunnel server
-  
-  This CloudFormation template deploys the Fluidity tunnel server as a Fargate task with
-  mTLS certificate management via AWS Secrets Manager.
-  
-  IMPORTANT NOTES:
-  
-  1. CERTIFICATES (PREREQUISITE):
-     - Run ./scripts/manage-certs.sh BEFORE deploying (generates certs locally)
-     - Pass certificate content as CloudFormation parameters during deployment
-     - CloudFormation creates Secrets Manager secret as part of the stack
-     - Certificates mounted as ECS secrets into the container at runtime
-     - Secret is deleted when stack is deleted (managed lifecycle)
-  
-  2. NETWORKING: 
-     - Container binds to 0.0.0.0:8443 (accepts connections on all interfaces)
-     - Security Group allows ingress from AllowedIngressCidr (default: 0.0.0.0/0)
-     - Task gets a public IP for agent connections (AssignPublicIp=ENABLED)
-     - Use GetPublicIPCommand output to find the task's public IP address
-  
-  3. COST OPTIMIZATION:
-     - Set DesiredCount=0 when not in use (no charges when stopped)
-     - Set DesiredCount=1 to start the server (~$0.012/hour for 0.25 vCPU + 0.5GB RAM)
-     - Estimated cost: ~$9/month for 24/7, ~$0.50/month for 2hrs/day
-  
-  4. DEPLOYMENT:
-     - Generate certificates: ./scripts/manage-certs.sh
-     - Push your Docker image to Amazon ECR first
-     - Deploy with certificates: ./scripts/deploy-fluidity.sh fargate deploy
-     - Start: aws ecs update-service --cluster fluidity --service fluidity-server --desired-count 1
-     - Stop:  aws ecs update-service --cluster fluidity --service fluidity-server --desired-count 0
-  
-  5. AGENT CONNECTION:
-     - Client certificates are in ./certs/ after running manage-certs.sh
-     - After starting (DesiredCount=1), wait ~60 seconds for task to be running
-     - Get public IP using the GetPublicIPCommand output
-     - Configure agent with: server_ip=<PUBLIC_IP>, server_port=8443
-     - Agent connects with mTLS using local certificate files
+Description: >
+  Fluidity - AWS Fargate (ECS) deployment for tunnel server with mTLS certificate management via AWS Secrets Manager.
+  Run ./scripts/manage-certs.sh to generate certificates before deploying.
+  Set DesiredCount=0 when not in use (no charges), DesiredCount=1 to start (~$9/month for 24/7).
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -134,15 +99,15 @@ Parameters:
   CertPem:
     Type: String
     NoEcho: true
-    Description: Base64-encoded server certificate PEM (from manage-certs.sh)
+    Description: Server certificate PEM (plain text from manage-certs.sh)
   KeyPem:
     Type: String
     NoEcho: true
-    Description: Base64-encoded server private key PEM (from manage-certs.sh)
+    Description: Server private key PEM (plain text from manage-certs.sh)
   CaPem:
     Type: String
     NoEcho: true
-    Description: Base64-encoded CA certificate PEM (from manage-certs.sh)
+    Description: CA certificate PEM (plain text from manage-certs.sh)
 
 Resources:
   # ============================================================================

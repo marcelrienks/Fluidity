@@ -110,12 +110,6 @@ make -f Makefile.<platform> run-agent
 ### Production (Recommended: CloudFormation)
 Deploy to AWS using **Infrastructure as Code** for automated, repeatable, cost-effective infrastructure.
 
-**Why CloudFormation:**
-- ✅ Single command deployment
-- ✅ Repeatable and version-controlled
-- ✅ Integrated monitoring and dashboards
-- ✅ Cost-optimized (~$0.11-0.21/month with Lambda control plane)
-
 **Quick Deploy:**
 ```bash
 ./scripts/deploy-fluidity.sh fargate deploy  # Deploy server infrastructure

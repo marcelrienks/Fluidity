@@ -221,56 +221,153 @@ docker tag fluidity-server:latest <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/f
 docker push <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/fluidity-server:latest
 ```
 
-#### Step 3: Configure Parameters
+#### Step 3: Deploy to AWS
 
-Edit `deployments/cloudformation/params.json`:
+You have **two options** for providing configuration parameters:
 
-```json
-[
-  {
-    "ParameterKey": "ContainerImage",
-    "ParameterValue": "<ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/fluidity-server:latest"
-  },
-  {
-    "ParameterKey": "VpcId",
-    "ParameterValue": "vpc-xxxxx"
-  },
-  {
-    "ParameterKey": "PublicSubnets",
-    "ParameterValue": "subnet-xxxxx,subnet-yyyyy"
-  },
-  {
-    "ParameterKey": "AllowedIngressCidr",
-    "ParameterValue": "0.0.0.0/0"
-  }
-]
+##### Option 3A: Command-Line Parameters (Recommended)
+
+Provide parameters directly via command-line arguments - no file editing required:
+
+```bash
+# macOS/Linux
+./scripts/deploy-fluidity.sh -a deploy \
+  --account-id 123456789012 \
+  --region us-east-1 \
+  --vpc-id vpc-0abc123def456789a \
+  --public-subnets subnet-0123456789abcdef0,subnet-0fedcba9876543210 \
+  --allowed-cidr 203.0.113.45/32
+
+# Windows PowerShell
+.\scripts\deploy-fluidity.ps1 -Action deploy `
+  -AccountId 123456789012 `
+  -Region us-east-1 `
+  -VpcId vpc-0abc123def456789a `
+  -PublicSubnets subnet-0123456789abcdef0,subnet-0fedcba9876543210 `
+  -AllowedIngressCidr 203.0.113.45/32
 ```
 
-**Note:** Certificate parameters (`CertPem`, `KeyPem`, `CaPem`) are automatically added by the deployment script.
+**Get Parameter Values:**
 
-#### Step 4: Deploy CloudFormation Stack
-
-**Using deployment script** (recommended):
 ```bash
-./scripts/deploy-fluidity.sh -e prod -a deploy
+# Bash
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+REGION="us-east-1"  # Your preferred region
+VPC_ID=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text)
+SUBNETS=$(aws ec2 describe-subnets --filters Name=vpc-id,Values=$VPC_ID Name=map-public-ip-on-launch,Values=true --query 'Subnets[*].SubnetId' --output text | tr '\t' ',')
+MY_IP=$(curl -s ifconfig.me)/32
+
+# Deploy with variables
+./scripts/deploy-fluidity.sh -a deploy \
+  --account-id $ACCOUNT_ID \
+  --region $REGION \
+  --vpc-id $VPC_ID \
+  --public-subnets $SUBNETS \
+  --allowed-cidr $MY_IP
 ```
 
-The script will:
-1. Check that certificates exist in `./certs/`
-2. Base64-encode the certificates
-3. Pass them as parameters to CloudFormation
-4. Deploy the stack with Secrets Manager secret created
+```powershell
+# PowerShell
+$ACCOUNT_ID = aws sts get-caller-identity --query Account --output text
+$REGION = "us-east-1"  # Your preferred region
+$VPC_ID = aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text
+$SUBNETS = (aws ec2 describe-subnets --filters Name=vpc-id,Values=$VPC_ID Name=map-public-ip-on-launch,Values=true --query 'Subnets[*].SubnetId' --output text) -replace '\s+', ','
+$MY_IP = (Invoke-WebRequest -Uri 'https://ifconfig.me' -UseBasicParsing).Content.Trim() + '/32'
 
-**Or deploy manually:**
+# Deploy with variables
+.\scripts\deploy-fluidity.ps1 -Action deploy `
+  -AccountId $ACCOUNT_ID `
+  -Region $REGION `
+  -VpcId $VPC_ID `
+  -PublicSubnets $SUBNETS `
+  -AllowedIngressCidr $MY_IP
+```
+
+**Optional Parameters:**
+
+All optional parameters have defaults. Override them if needed:
+
 ```bash
-aws cloudformation create-stack \
-  --stack-name fluidity-fargate \
-  --template-body file://deployments/cloudformation/fargate.yaml \
-  --parameters file://deployments/cloudformation/params.json \
-    ParameterKey=CertPem,ParameterValue=$(base64 -i ./certs/server.crt | tr -d '\n') \
-    ParameterKey=KeyPem,ParameterValue=$(base64 -i ./certs/server.key | tr -d '\n') \
-    ParameterKey=CaPem,ParameterValue=$(base64 -i ./certs/ca.crt | tr -d '\n') \
-  --capabilities CAPABILITY_NAMED_IAM
+# Bash example with optional parameters
+./scripts/deploy-fluidity.sh -a deploy \
+  --account-id $ACCOUNT_ID \
+  --region $REGION \
+  --vpc-id $VPC_ID \
+  --public-subnets $SUBNETS \
+  --allowed-cidr $MY_IP \
+  --cluster-name my-cluster \
+  --service-name my-service \
+  --cpu 512 \
+  --memory 1024 \
+  --desired-count 1
+```
+
+```powershell
+# PowerShell example with optional parameters
+.\scripts\deploy-fluidity.ps1 -Action deploy `
+  -AccountId $ACCOUNT_ID `
+  -Region $REGION `
+  -VpcId $VPC_ID `
+  -PublicSubnets $SUBNETS `
+  -AllowedIngressCidr $MY_IP `
+  -ClusterName my-cluster `
+  -ServiceName my-service `
+  -Cpu 512 `
+  -Memory 1024 `
+  -DesiredCount 1
+```
+
+##### Option 3B: Parameters File (Legacy)
+
+Edit `deployments/cloudformation/params.json` and replace all values surrounded by `<>`:
+
+**Required Parameters:**
+
+| Parameter | What to Replace | How to Get It |
+|-----------|----------------|---------------|
+| **ContainerImage** | `<ACCOUNT_ID>` and `<REGION>` | `aws sts get-caller-identity --query Account --output text` |
+| **VpcId** | `<VPC_ID>` | `aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text` |
+| **PublicSubnets** | `<SUBNET_ID_1>,<SUBNET_ID_2>` | `aws ec2 describe-subnets --filters Name=vpc-id,Values=<VPC_ID> --query 'Subnets[*].SubnetId' --output text` |
+| **AllowedIngressCidr** | `<YOUR_IP>` | `curl ifconfig.me` then add `/32` |
+
+Then deploy:
+
+```bash
+# macOS/Linux
+./scripts/deploy-fluidity.sh -a deploy
+
+# Windows PowerShell
+.\scripts\deploy-fluidity.ps1 -Action deploy
+```
+#### Step 4: Deployment Actions
+
+Once deployed, manage your stack using these commands:
+
+**Check stack status:**
+```bash
+# Bash
+./scripts/deploy-fluidity.sh -a status
+
+# PowerShell
+.\scripts\deploy-fluidity.ps1 -Action status
+```
+
+**View stack outputs:**
+```bash
+# Bash
+./scripts/deploy-fluidity.sh -a outputs
+
+# PowerShell
+.\scripts\deploy-fluidity.ps1 -Action outputs
+```
+
+**Delete stack:**
+```bash
+# Bash
+./scripts/deploy-fluidity.sh -a delete -f
+
+# PowerShell
+.\scripts\deploy-fluidity.ps1 -Action delete -Force
 ```
 
 #### Step 5: Start the Server
