@@ -31,3 +31,4 @@ node_modules/
 
 # Temporary test files
 fluidity-ws-test.js
+*Zone.Identifier
